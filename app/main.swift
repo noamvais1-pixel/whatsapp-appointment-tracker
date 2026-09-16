@@ -29,19 +29,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
         buildMenu()
 
         let rect = NSRect(x: 0, y: 0, width: 1100, height: 760)
-        window = NSWindow(contentRect: rect, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window = NSWindow(contentRect: rect, styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         window.title = "מעקב פגישות"
+        // Liquid-glass feel: the desktop shows through a frosted layer behind the page
+        window.titlebarAppearsTransparent = true
+        window.isOpaque = false
+        window.backgroundColor = .clear
         window.minSize = NSSize(width: 720, height: 480)
         window.setFrameAutosaveName("MainWindow")
         window.center()
 
         let cfg = WKWebViewConfiguration()
         cfg.preferences.javaScriptCanOpenWindowsAutomatically = false
+        // tell the page it runs inside the native window, so it can use a transparent background
+        let mark = WKUserScript(source: "document.documentElement.classList.add('native')", injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        cfg.userContentController.addUserScript(mark)
         web = WKWebView(frame: rect, configuration: cfg)
         web.uiDelegate = self
         web.navigationDelegate = self
         web.autoresizingMask = [.width, .height]
-        window.contentView = web
+        web.setValue(false, forKey: "drawsBackground")
+
+        let frost = NSVisualEffectView(frame: rect)
+        frost.material = .underWindowBackground
+        frost.blendingMode = .behindWindow
+        frost.state = .active
+        frost.autoresizingMask = [.width, .height]
+        frost.addSubview(web)
+        window.contentView = frost
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
@@ -67,7 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
 
     func showStatus(_ text: String) {
         let html = """
-        <html dir="rtl"><body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font:18px -apple-system,Helvetica;color:#555;background:#f6f5f1">\(text)</body></html>
+        <html dir="rtl"><body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font:18px -apple-system,Helvetica;color:#555;background:transparent">\(text)</body></html>
         """
         web.loadHTMLString(html, baseURL: nil)
     }

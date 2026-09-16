@@ -3,3 +3,4 @@ data/
 .env
 .wwebjs_auth/
 .wwebjs_cache/
+.DS_Store
