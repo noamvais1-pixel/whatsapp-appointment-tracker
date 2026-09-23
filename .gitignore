@@ -4,3 +4,4 @@ data/
 .wwebjs_auth/
 .wwebjs_cache/
 .DS_Store
+.playwright-mcp/

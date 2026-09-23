@@ -54,6 +54,16 @@ export function startServer(getClient) {
 
   app.get("/api/chats", async (req, res) => res.json(await listChats()));
 
+  // Numbers and links found in the chat history (phones, bank details, IDs, references, addresses, URLs).
+  app.get("/api/refs", async (req, res) => {
+    const { allRefs, refStats, REF_TYPES } = await import("./refs.js");
+    res.json({ refs: allRefs(), stats: refStats(), types: REF_TYPES });
+  });
+  app.get("/api/refs/export", async (req, res) => {
+    const { refsText } = await import("./refs.js");
+    res.type("text/plain").send(refsText());
+  });
+
   // Chat panel: recent messages of one chat (refreshed from WhatsApp when linked) and sending through the linked account.
   app.get("/api/chats/:chatId/messages", async (req, res) => {
     const chatId = req.params.chatId;
@@ -193,6 +203,24 @@ const PAGE = /* html */ `<!doctype html>
   .ci .p{grid-column:1/3;font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .ci .u{background:var(--accent);color:#fff;border-radius:99px;font-size:11px;padding:1px 7px;justify-self:end}
   .cempty{flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);border-radius:var(--r);background:var(--glass2);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);border:1px solid var(--line)}
+  /* numbers & links */
+  #refsview{display:none}#refsview.on{display:block}
+  .rtools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  .rtools input{font:inherit;flex:1;min-width:220px;padding:9px 14px;border:1px solid var(--line);border-radius:14px;background:var(--glass-strong);color:var(--ink);outline:none;-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+  .rtools input:focus{border-color:rgba(27,122,74,.5);box-shadow:0 0 0 3px rgba(27,122,74,.15)}
+  .rcard{border-radius:var(--r2);padding:12px 15px;margin-bottom:9px;display:grid;grid-template-columns:30px 1fr auto;gap:10px;align-items:start;
+    background:var(--glass);-webkit-backdrop-filter:blur(24px) saturate(160%);backdrop-filter:blur(24px) saturate(160%);border:1px solid var(--line);box-shadow:var(--shadow)}
+  .rcard.self{border-color:rgba(27,122,74,.45);box-shadow:var(--shadow),0 0 0 1px rgba(27,122,74,.25)}
+  /* values are isolated from the Hebrew around them; dir="auto" keeps digits/URLs LTR and Hebrew values RTL */
+  .rval{font-weight:650;font-size:15.5px;unicode-bidi:isolate;display:inline-block;max-width:100%;overflow-wrap:anywhere}
+  a.rval{color:var(--accent);text-decoration:none}a.rval:hover{text-decoration:underline}
+  .rtag{font-size:11.5px;padding:2px 9px;border-radius:99px;background:rgba(120,130,150,.16);color:var(--muted);font-weight:600;margin-inline-start:8px;vertical-align:2px;white-space:nowrap}
+  .rtag.mine{background:rgba(27,122,74,.16);color:var(--accent)}
+  .rctx{font-size:13px;color:var(--muted);margin-top:5px;overflow-wrap:anywhere}
+  .rctx b{color:var(--ink);font-weight:650;unicode-bidi:isolate;display:inline-block}
+  .rmeta{font-size:12.5px;color:var(--muted);margin-top:4px}
+  .rmore{font-size:12.5px;color:var(--muted);background:none;border:0;box-shadow:none;padding:2px 0;cursor:pointer;text-decoration:underline}
+  .ract{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.ract button{padding:4px 10px;font-size:12.5px}
   #panel{position:fixed;top:14px;left:14px;bottom:14px;width:min(460px,calc(100vw - 28px));border-radius:var(--r);display:flex;flex-direction:column;overflow:hidden;transform:translateX(-110%);transition:transform .22s;z-index:20;
     background:var(--glass);-webkit-backdrop-filter:blur(30px) saturate(170%);backdrop-filter:blur(30px) saturate(170%);border:1px solid var(--line);box-shadow:0 20px 60px rgba(25,35,70,.22),0 1px 0 rgba(255,255,255,.9) inset}
   #panel.open{transform:none}
@@ -227,7 +255,7 @@ const PAGE = /* html */ `<!doctype html>
 <button id="checkbtn" onclick="checkNow()">לבדוק הודעות חדשות עכשיו</button><button onclick="openDigest()">סדר היום</button><button id="switchbtn" onclick="switchPhone()">החלפת טלפון</button><button onclick="quitApp()" title="לעצור את התוכנה">יציאה</button></header>
 <div id="strip" class="strip" onclick="this.classList.toggle('open')"><span class="dot"></span><b id="stext">בודק…</b><span class="d" id="sdetails"></span><span class="grow"></span><span class="stat">לחיצה לפרטים</span></div>
 <main id="main">
-<div class="views"><button id="v-tasks" class="on" onclick="setView('tasks')">משימות</button><button id="v-chats" onclick="setView('chats')">צ'אטים</button></div>
+<div class="views"><button id="v-tasks" class="on" onclick="setView('tasks')">משימות</button><button id="v-refs" onclick="setView('refs')">מספרים וקישורים</button><button id="v-chats" onclick="setView('chats')">צ'אטים</button></div>
 <div id="alerts"></div>
 <div id="qr" class="qr" style="display:none"><div style="margin-bottom:10px">בטלפון שרוצים לעקוב אחריו: <b>וואטסאפ ← הגדרות ← מכשירים מקושרים ← קישור מכשיר</b>, ואז לסרוק:</div><img id="qrimg" alt="קוד QR"></div>
 <form class="add" onsubmit="return addItem(event)"><select id="ntype"><option value="follow_up">מעקב</option><option value="meeting">פגישה</option><option value="call">שיחה</option></select>
@@ -235,6 +263,11 @@ const PAGE = /* html */ `<!doctype html>
 <div id="tasksview">
 <nav id="tabs"></nav>
 <div id="list"></div>
+</div>
+<div id="refsview">
+<div class="rtools"><input id="rsearch" placeholder="חיפוש מספר, קישור, שם או מילה מההודעה…" oninput="renderRefs()"><button onclick="copyAllRefs()">העתקת הכל</button></div>
+<nav id="rtabs"></nav>
+<div id="rlist"></div>
 </div>
 <div id="chatsview"><div class="clist"><input id="csearch" placeholder="חיפוש צ'אט…" oninput="renderChats()"><div class="cl" id="clist"></div></div><div id="cslot" class="cempty">בוחרים צ'אט מהרשימה</div></div>
 </main>
@@ -308,8 +341,9 @@ async function quitApp(){ if(!confirm('לעצור את התוכנה? היא תפ
 async function openDigest(){ const t=await (await fetch('/api/digest')).text(); alert(t.replace(/\\*/g,'')); }
 let cur=null, ptimer=null, view=localStorage.getItem('view')||'tasks', chats=[], ctimer=null;
 function setView(v){ view=v; localStorage.setItem('view',v); document.body.classList.toggle('chats',v==='chats');
-  document.getElementById('v-tasks').classList.toggle('on',v==='tasks'); document.getElementById('v-chats').classList.toggle('on',v==='chats');
+  for(const k of ['tasks','refs','chats']) document.getElementById('v-'+k).classList.toggle('on',v===k);
   document.getElementById('tasksview').style.display=v==='tasks'?'':'none'; document.querySelector('.add').style.display=v==='tasks'?'':'none';
+  document.getElementById('refsview').classList.toggle('on',v==='refs'); if(v==='refs') loadRefs();
   document.getElementById('chatsview').classList.toggle('on',v==='chats'); document.getElementById('main').classList.toggle('wide',v==='chats');
   const panel=document.getElementById('panel');
   if(v==='chats'){ if(cur){ const slot=document.getElementById('cslot'); if(slot) slot.replaceWith(panel); panel.classList.add('open'); } else panel.classList.remove('open'); loadChats(); clearInterval(ctimer); ctimer=setInterval(loadChats,20000); }
@@ -360,5 +394,57 @@ async function sendMsg(){ if(!cur) return; const ta=document.getElementById('pte
   const r=await fetch('/api/chats/'+encodeURIComponent(cur.chatId)+'/send',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text})}); const j=await r.json(); ta.disabled=false;
   if(!r.ok){ alert('השליחה נכשלה: '+(j.error||r.status)); return; } ta.value=''; document.getElementById('psent').textContent='נשלח ✓'; setTimeout(()=>document.getElementById('psent').textContent='',2500); setTimeout(()=>{loadChat(true);load();},1500); }
 document.getElementById('ptext').addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendMsg(); } });
+
+/* ---- מספרים וקישורים ---- */
+let R=null, rtab=localStorage.getItem('rtab')||'all', rOpen={};
+const RSELF='פתק לעצמי';
+async function loadRefs(){ const list=document.getElementById('rlist');
+  if(!R) list.innerHTML='<div class="empty">קורא את ההיסטוריה…</div>';
+  try{ R=await (await fetch('/api/refs')).json(); }catch{ list.innerHTML='<div class="empty">לא הצלחתי לטעון.</div>'; return; }
+  renderRefs(); }
+function refText(e){ return [e.display,e.value,e.label,e.type_he,...e.occurrences.map(o=>o.context+' '+(o.chat_name||'')+' '+(o.sender||''))].filter(Boolean).join(' ').toLowerCase(); }
+function refMatches(e,q){ if(!q) return true; return q.split(/\\s+/).filter(Boolean).every(w=>refText(e).includes(w)||e.value.replace(/\\D/g,'').includes(w.replace(/\\D/g,''))&&/\\d/.test(w)); }
+function renderRefs(){ if(!R) return;
+  const q=(document.getElementById('rsearch').value||'').trim().toLowerCase();
+  const found=R.refs.filter(e=>refMatches(e,q));
+  const counts={all:found.length,self:found.filter(e=>e.self_note).length};
+  for(const e of found) counts[e.type]=(counts[e.type]||0)+1;
+  const order=['link','phone','bank','ref','id','code','email','address','number'];
+  const tabs=[['all','הכל',counts.all]];
+  if(counts.self) tabs.push(['self',RSELF,counts.self]);
+  for(const t of order) if(counts[t]) tabs.push([t,R.types[t].icon+' '+R.types[t].he,counts[t]]);
+  if(!tabs.some(t=>t[0]===rtab)) rtab='all';
+  document.getElementById('rtabs').innerHTML=tabs.map(([k,l,n])=>'<button class="'+(rtab===k?'on':'')+'" onclick="setRtab(\\''+k+'\\')">'+esc(l)+' <span class="muted">'+n+'</span></button>').join('');
+  const items=found.filter(e=>rtab==='all'||(rtab==='self'?e.self_note:e.type===rtab));
+  const box=document.getElementById('rlist');
+  if(!items.length){ box.innerHTML='<div class="empty">'+(q?'לא נמצא כלום שמתאים לחיפוש.':'עוד לא נמצאו מספרים או קישורים בהודעות.')+'</div>'; return; }
+  box.innerHTML=items.map(e=>refCard(e,q)).join(''); }
+function setRtab(t){ rtab=t; localStorage.setItem('rtab',t); renderRefs(); }
+function fmtRefDate(ts){ return new Date(ts*1000).toLocaleDateString(L,{day:'numeric',month:'short',year:'numeric'}); }
+// highlight the value inside its Hebrew context without letting the digits reorder the sentence
+function ctxHtml(ctx,e){ const v=e.type==='bank'?null:e.display; let h=esc(ctx);
+  if(v){ const i=ctx.indexOf(v); if(i>=0) h=esc(ctx.slice(0,i))+'<b dir="auto">'+esc(v)+'</b>'+esc(ctx.slice(i+v.length)); }
+  return h; }
+function refCard(e,q){ const o=e.occurrences[0]; const open=rOpen[e.key];
+  const val=e.type==='link'
+    ? '<a class="rval" dir="auto" href="'+esc(e.value)+'" target="_blank" rel="noopener noreferrer">'+esc(e.display.length>78?e.display.slice(0,78)+'…':e.display)+'</a>'
+    : '<span class="rval" dir="auto">'+esc(e.display)+'</span>';
+  const tags=(e.self_note?'<span class="rtag mine">'+RSELF+'</span>':(o.from_me?'<span class="rtag mine">שלחת</span>':''))
+    +'<span class="rtag">'+e.icon+' '+esc(e.type_he)+'</span>'+(e.count>1?'<span class="rtag">'+e.count+' פעמים</span>':'');
+  const occ=(open?e.occurrences:e.occurrences.slice(0,1)).map(x=>
+    '<div class="rctx">'+ctxHtml(x.context,e)+'</div>'
+    +'<div class="rmeta"><bdi>'+esc(x.chat_name||x.chat_id)+'</bdi> · <bdi>'+esc(x.sender||'')+'</bdi> · '+fmtRefDate(x.ts)+'</div>').join('');
+  return '<div class="rcard'+(e.self_note?' self':'')+'"><div class="ico">'+e.icon+'</div><div>'
+    +'<div>'+val+tags+'</div>'+occ
+    +(e.count>1?'<button class="rmore" onclick="toggleRef(\\''+esc(e.key)+'\\')">'+(open?'פחות':e.count===2?'עוד מקום אחד':'עוד '+(e.count-1)+' מקומות')+'</button>':'')
+    +'</div><div class="ract">'
+    +'<button onclick="copyRef(this,\\''+esc(encodeURIComponent(e.display))+'\\')">העתקה</button>'
+    +'<button onclick="openRefChat(\\''+esc(o.chat_id)+'\\',\\''+esc(o.msg_id)+'\\',\\''+esc(encodeURIComponent(o.chat_name||o.chat_id))+'\\')">לצ\\'אט</button>'
+    +'</div></div>'; }
+function toggleRef(k){ rOpen[k]=!rOpen[k]; renderRefs(); }
+async function copyRef(btn,enc){ const t=decodeURIComponent(enc); try{ await navigator.clipboard.writeText(t); const o=btn.textContent; btn.textContent='הועתק ✓'; setTimeout(()=>btn.textContent=o,1500); }catch{ prompt('להעתיק:',t); } }
+async function copyAllRefs(){ try{ const t=await (await fetch('/api/refs/export')).text(); await navigator.clipboard.writeText(t); alert('הרשימה הועתקה.'); }catch{ alert('ההעתקה לא עבדה.'); } }
+async function openRefChat(chatId,msgId,encName){ setView('chats'); await showChat({chatId,name:decodeURIComponent(encName),msgId}); }
+
 load(); setInterval(load,10000);
 </script></body></html>`;

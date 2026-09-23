@@ -241,6 +241,8 @@ function createClient({ onReady } = {}) {
     state.health.readErrors = 0;
     state.qrDataUrl = null;
     state.me = client.info?.pushname || client.info?.wid?.user || "me";
+    // remembered so the "numbers and links" view can tell the "message yourself" chat apart
+    if (client.info?.wid?._serialized) store.setMeta("me_wid", client.info.wid._serialized);
     console.log(`[whatsapp] linked as ${state.me}`);
     await sleep(8000); // WhatsApp Web reloads itself right after linking; reading during that fails
     heartbeat().catch(() => {}); // prove the link is alive right away so the status line is honest from the start

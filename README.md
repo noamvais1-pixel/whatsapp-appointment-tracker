@@ -48,7 +48,8 @@ close it (or press Ctrl+C) to stop.
 
 ## The dashboard
 
-Two views at the top: **משימות** (tasks: the meetings and follow-ups) and **צ'אטים** (chats):
+Three views at the top: **משימות** (tasks: the meetings and follow-ups), **מספרים וקישורים**
+(numbers and links, see below) and **צ'אטים** (chats):
 a WhatsApp-Web-style list of all chats with search, last message and unread count. Clicking a
 chat opens the conversation next to it, and you can write and send from there.
 
@@ -83,6 +84,29 @@ is really needed: an open question, an unconfirmed quote or appointment, a refun
 chasing, or something you promised to get back to them about. Pure "thanks / see you"
 endings and bots are skipped. The reminder shows the reason, and it closes itself when
 they reply or when you write to them from the panel.
+
+## Numbers and links (מספרים וקישורים)
+
+A searchable index of the reference data buried in the chat history, so you never scroll back
+looking for an account number or a Zoom link. Built with plain regexes over the stored messages -
+no Gemini, nothing leaves the machine.
+
+Picks up phone numbers, bank details (branch + account read as one unit, even across line breaks),
+ID numbers, invoice / receipt / order / tracking references, codes, emails, street addresses and
+URLs. Long unlabelled numbers land in their own `מספר` tab rather than polluting the rest.
+
+- Every value keeps **its context**: the sentence it appeared in, who sent it, which chat, and when.
+- **Search matches both the value and the surrounding text** - `0504287709`, `שער`, `zoom`, or a
+  person's name all work; hyphens in numbers are ignored.
+- Repeated values are deduplicated into one row with an "X more places" expander.
+- Anything you sent is tagged **שלחת**; anything in the **Message yourself** chat is tagged
+  **פתק לעצמי** and sorted to the top, since that is where people deliberately stash things.
+  (The self-chat is matched against the linked account's own WhatsApp id, stored in `meta.me_wid`
+  when the phone links, so it only kicks in after the next link/backfill.)
+- **Copy** for one value, **העתקת הכל** for the whole list as plain text, **לצ'אט** to jump to
+  the exact message.
+
+Endpoints: `GET /api/refs` (JSON) and `GET /api/refs/export` (plain text).
 
 ## Settings (`.env`)
 
