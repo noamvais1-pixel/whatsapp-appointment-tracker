@@ -8,6 +8,7 @@ import { checkNoReplies } from "./noreply.js";
 import { closePastAppointments } from "./expire.js";
 import { heartbeat } from "./whatsapp.js";
 import { summary } from "./status.js";
+import { syncCalendar } from "./calendar.js";
 import { notify } from "./notify.js";
 
 if (!config.geminiKey) {
@@ -67,6 +68,10 @@ if (config.dailyDigestTime) {
     }
   }, 30_000);
 }
+
+// Mirror meetings and calls into the Mac Calendar (which iCloud carries to the iPhone).
+setTimeout(() => syncCalendar(), 30_000);
+setInterval(() => syncCalendar(), 3 * 60_000);
 
 // Self-test every minute; if the Mac was asleep (the timer jumped), test immediately.
 let lastTick = Date.now();

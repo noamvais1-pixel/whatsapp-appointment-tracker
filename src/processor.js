@@ -82,6 +82,10 @@ function applyItem(it, chatId, chatName, existing) {
 
 /** Process all chats that have pending messages. */
 export async function processPending({ minAgeSec = 0 } = {}) {
+  try { return await processPendingInner({ minAgeSec }); }
+  finally { import("./calendar.js").then((m) => m.syncCalendar()).catch(() => {}); }
+}
+async function processPendingInner({ minAgeSec = 0 } = {}) {
   const chats = store.unprocessedChats();
   const nowSec = Math.floor(Date.now() / 1000);
   let total = 0;

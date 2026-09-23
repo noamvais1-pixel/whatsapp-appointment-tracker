@@ -4,6 +4,7 @@ import * as store from "./db.js";
 import { state, relink, runBackfill, listChats } from "./whatsapp.js";
 import { buildDigest, localDateKey } from "./digest.js";
 import { summary } from "./status.js";
+import { syncCalendar, calState, inCalendar } from "./calendar.js";
 import { openMedia, requestMedia, isQueued } from "./media.js";
 import fs from "node:fs";
 import { processPending } from "./processor.js";
@@ -14,8 +15,8 @@ export function startServer(getClient) {
 
   app.get("/api/state", (req, res) => {
     res.json({
-      status: state.status, qr: state.qrDataUrl, me: state.me, backfill: state.backfill, lastError: state.lastError, health: state.health, summary: summary(),
-      today: localDateKey(), timezone: config.timezone, stats: store.stats(), items: store.allItems(),
+      status: state.status, qr: state.qrDataUrl, me: state.me, backfill: state.backfill, lastError: state.lastError, health: state.health, summary: summary(), calendar: calState,
+      today: localDateKey(), timezone: config.timezone, stats: store.stats(), items: store.allItems().map((i) => ({ ...i, in_calendar: inCalendar(i.id) })),
     });
   });
   app.post("/api/items/:id/status", (req, res) => {
@@ -23,11 +24,14 @@ export function startServer(getClient) {
     if (!["open", "done", "cancelled"].includes(status)) return res.status(400).json({ error: "bad status" });
     store.setStatus(Number(req.params.id), status, "from dashboard");
     res.json({ ok: true });
+    syncCalendar();
   });
+  app.post("/api/calendar/sync", async (req, res) => { const n = await syncCalendar(); res.json({ ok: !calState.lastError, touched: n ?? 0, error: calState.lastError }); });
   app.post("/api/items/:id", (req, res) => {
     const { title, when_iso, notes, type } = req.body || {};
     store.editItem(Number(req.params.id), { title, when_iso, notes, type });
     res.json({ ok: true });
+    syncCalendar();
   });
   app.post("/api/items", (req, res) => {
     const { type = "follow_up", title, who, when_iso, notes } = req.body || {};
@@ -302,7 +306,7 @@ function render(){
     const over=it.status==='open'&&d&&d<S.today;
     html+='<div class="card '+(it.status!=='open'?'done':'')+'"><div class="ico">'+ICON[it.type]+'</div><div>'
       +'<div><span class="when '+(over?'overdue':'')+'">'+esc(fmtWhen(it))+'</span> &nbsp;<span class="title" title="לפתוח את הצ\\'אט" onclick="openChat('+it.id+')">'+esc(it.title)+'</span></div>'
-      +'<div class="meta">'+[it.who, it.chat_name&&it.chat_name!==it.who?'צ\\'אט: '+it.chat_name:null, it.location, STATUS_HE[it.status]||null, it.confidence==='medium'?'ביטחון בינוני':it.confidence==='low'?'ביטחון נמוך':null].filter(Boolean).map(esc).join(' · ')+'</div>'
+      +'<div class="meta">'+[it.who, it.chat_name&&it.chat_name!==it.who?'צ\\'אט: '+it.chat_name:null, it.location, STATUS_HE[it.status]||null, it.confidence==='medium'?'ביטחון בינוני':it.confidence==='low'?'ביטחון נמוך':null, it.in_calendar?'📅 ביומן':null].filter(Boolean).map(esc).join(' · ')+'</div>'
       +(it.notes?'<div class="meta">'+esc(it.notes)+'</div>':'')
       +(it.source_quote?'<div class="quote">„'+esc(it.source_quote)+'”</div>':'')
       +'</div><div class="actions">'

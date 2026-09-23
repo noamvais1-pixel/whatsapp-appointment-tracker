@@ -72,6 +72,14 @@ duplicated. When someone says "sent it" / "done", the follow-up is closed.
 messages from the linked account, the message the item came from is highlighted, and
 you can type a reply that is sent through the linked WhatsApp (not the desktop one).
 
+**iPhone calendar.** Every meeting or call with a date is mirrored into the Mac Calendar app,
+into the calendar named in `CALENDAR_NAME` (currently "עבודה", an iCloud calendar, so it shows
+on the iPhone). A calendar the app creates itself lands outside iCloud and never reaches the
+phone, so to use a separate calendar create it on the iPhone under iCloud first, then name it here. Items that are in the
+calendar show a "📅 ביומן" badge. Meetings are 60 minutes, calls 30, with a 30-minute alert
+(all adjustable in `.env`). Date changes move the event, cancellations delete it, done items
+keep it. Follow-ups are not added. macOS asks once for permission to control Calendar.
+
 **Past appointments.** A meeting or call whose time passed more than 12 hours ago
 (`AUTO_CLOSE_PAST_HOURS`): a confirmed one is closed as "done" and moves to the done tab;
 a time that was only proposed and never answered is not closed but becomes a follow-up
@@ -116,6 +124,8 @@ Endpoints: `GET /api/refs` (JSON) and `GET /api/refs/export` (plain text).
 | `BACKFILL_DAYS` | How far back to read on first link. |
 | `IGNORE_GROUPS` | `true` skips group chats (recommended). |
 | `ONLY_CHATS` / `SKIP_CHATS` | Comma-separated contact names or numbers to include / exclude. |
+| `CALENDAR_NAME` | Mac calendar that receives meetings and calls. `CALENDAR_SYNC=false` turns it off. |
+| `CALENDAR_MEETING_MINUTES` / `CALENDAR_CALL_MINUTES` / `CALENDAR_ALARM_MINUTES` | Event lengths and the alert, in minutes. |
 | `DAILY_DIGEST_TIME` | e.g. `08:00` to get the day's agenda in your own WhatsApp chat ("You"). Blank = off. |
 | `GEMINI_MODEL` | Which Gemini model to use. `gemini-3.5-flash-lite` (default) is the only one a free key can use all day: a free key gets just ~20 requests a day on `gemini-3.5-flash` or `gemini-3.8-flash`. With billing enabled, switch to one of those. |
 | `GEMINI_MIN_INTERVAL_MS` | Gap between Gemini requests. `13000` suits a free key; lower it to `1000` if you enable billing. |
