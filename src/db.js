@@ -63,6 +63,13 @@ if (!db.prepare("PRAGMA table_info(messages)").all().some((c) => c.name === "med
   db.exec("ALTER TABLE messages ADD COLUMN media_type TEXT");
 }
 
+// Phone numbers behind WhatsApp's internal chat ids (resolved lazily, cached here).
+db.exec(`CREATE TABLE IF NOT EXISTS contacts (
+  chat_id TEXT PRIMARY KEY,
+  phone TEXT,                      -- digits only, e.g. 972501234567; NULL when WhatsApp gave none
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
+
 // Added later: which mechanism created the item ('' = extracted from chat text, 'noreply' = unanswered-message reminder)
 if (!db.prepare("PRAGMA table_info(items)").all().some((c) => c.name === "kind")) {
   db.exec("ALTER TABLE items ADD COLUMN kind TEXT NOT NULL DEFAULT ''");
@@ -121,6 +128,8 @@ const stmts = {
   editItem: db.prepare(
     `UPDATE items SET title = COALESCE(?, title), when_iso = COALESCE(?, when_iso), notes = COALESCE(?, notes), type = COALESCE(?, type), updated_at = datetime('now') WHERE id = ?`,
   ),
+  getPhone: db.prepare(`SELECT phone, updated_at FROM contacts WHERE chat_id = ?`),
+  setPhone: db.prepare(`INSERT OR REPLACE INTO contacts (chat_id, phone) VALUES (?, ?)`),
   chatSummaries: db.prepare(
     `SELECT m.chat_id AS id, m.chat_name AS name, m.ts AS timestamp, m.body AS last_body, m.from_me AS last_from_me
        FROM messages m JOIN (SELECT chat_id, MAX(ts) AS mts FROM messages GROUP BY chat_id) x
@@ -208,6 +217,19 @@ export function wipeAll() {
 }
 export const lastMessagePerChat = () => stmts.lastMessagePerChat.all();
 export const chatSummaries = () => stmts.chatSummaries.all();
+export const getPhone = (chatId) => stmts.getPhone.get(chatId);
+export const setPhone = (chatId, phone) => stmts.setPhone.run(chatId, phone ?? null);
+/** Israeli numbers as +972 5X-XXX-XXXX / +972 X-XXX-XXXX; anything else as +digits. */
+export function fmtPhone(digits) {
+  if (!digits) return "";
+  if (digits.startsWith("972")) {
+    const local = digits.slice(3);
+    if (local.length === 9) return `+972 ${local.slice(0, 2)}-${local.slice(2, 5)}-${local.slice(5)}`;
+    if (local.length === 8) return `+972 ${local.slice(0, 1)}-${local.slice(1, 4)}-${local.slice(4)}`;
+  }
+  if (digits.startsWith("1") && digits.length === 11) return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
+  return "+" + digits;
+}
 export const noReplyItemForMsg = (msgId) => stmts.noReplyItemForMsg.get(msgId);
 export function closeNoReply(chatId, detail = "they replied") {
   let n = 0;

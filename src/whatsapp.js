@@ -249,6 +249,7 @@ function createClient({ onReady } = {}) {
     await runBackfill();
     onReady?.(client);
     processPending().catch((e) => console.error("[process]", e.message)); // analyse whatever the read found, in the background
+    setTimeout(() => resolveAllPhones(), 60_000);
   });
 
   // message_create fires for both incoming and outgoing messages
@@ -311,6 +312,50 @@ export async function runBackfill() {
   return false;
 }
 
+// Most chats use WhatsApp's internal ids ("...@lid"), not phone numbers. Ask WhatsApp for the
+// number behind each id once, cache it, and refresh a "none" answer after a week.
+let resolving = false;
+export async function resolvePhones(chatIds) {
+  if (resolving || !current || state.status !== "ready") return;
+  const todo = chatIds.filter((id) => {
+    if (!id.endsWith("@lid") && !id.endsWith("@c.us")) return false;
+    const row = store.getPhone(id);
+    if (!row) return true;
+    return !row.phone && Date.now() - new Date(row.updated_at + "Z").getTime() > 7 * 86400_000;
+  }).slice(0, 40);
+  if (!todo.length) return;
+  resolving = true;
+  try {
+    const res = await withTimeout(current.getContactLidAndPhone(todo), 30000);
+    todo.forEach((id, i) => {
+      const pn = res?.[i]?.pn || (id.endsWith("@c.us") ? id : null);
+      store.setPhone(id, pn ? pn.replace(/@.*$/, "").replace(/\D/g, "") : null);
+    });
+    console.log(`[contacts] resolved ${res.filter((r) => r?.pn).length}/${todo.length} phone numbers`);
+    chatListCache.at = 0; // let the next list pick the numbers up
+  } catch (e) {
+    console.warn("[contacts] could not resolve phone numbers:", String(e.message).slice(0, 100));
+  } finally {
+    resolving = false;
+  }
+}
+export const phoneFor = (chatId) => store.fmtPhone(store.getPhone(chatId)?.phone);
+
+/** Work through every chat once in the background (40 at a time) so numbers are there before the list is opened. */
+export async function resolveAllPhones() {
+  try {
+    const list = await listChats();
+    const pending = list.filter((c) => !c.isGroup && !c.phone).map((c) => c.id);
+    for (let i = 0; i < pending.length; i += 40) {
+      if (!current || state.status !== "ready") return;
+      await resolvePhones(pending.slice(i, i + 40));
+      await sleep(2000);
+    }
+  } catch (e) {
+    console.warn("[contacts] background resolve stopped:", String(e.message).slice(0, 80));
+  }
+}
+
 let chatListCache = { at: 0, list: [] };
 /** Chat list for the dashboard (live from WhatsApp when linked, else from stored messages). */
 export async function listChats() {
@@ -323,6 +368,7 @@ export async function listChats() {
         .map((c) => ({
           id: c.id._serialized,
           name: c.name || c.id.user,
+          phone: c.isGroup ? "" : phoneFor(c.id._serialized),
           isGroup: !!c.isGroup,
           timestamp: c.timestamp || 0,
           unread: c.unreadCount || 0,
@@ -332,13 +378,14 @@ export async function listChats() {
         .sort((a, b) => b.timestamp - a.timestamp);
       chatListCache = { at: Date.now(), list };
       reportRead(true);
+      resolvePhones(list.filter((c) => !c.isGroup && !c.phone).map((c) => c.id)); // in the background
       return list;
     } catch (e) {
       console.warn("[chats] could not list chats:", String(e.message).slice(0, 100));
       reportRead(false, e);
     }
   }
-  return store.chatSummaries().map((c) => ({ ...c, isGroup: false, unread: 0, last_from_me: !!c.last_from_me }));
+  return store.chatSummaries().map((c) => ({ ...c, phone: phoneFor(c.id), isGroup: false, unread: 0, last_from_me: !!c.last_from_me }));
 }
 
 async function fetchWithRetry(chat, opts) {

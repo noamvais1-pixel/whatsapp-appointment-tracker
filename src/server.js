@@ -1,7 +1,7 @@
 import express from "express";
 import { config } from "./config.js";
 import * as store from "./db.js";
-import { state, relink, runBackfill, listChats } from "./whatsapp.js";
+import { state, relink, runBackfill, listChats, phoneFor, resolvePhones } from "./whatsapp.js";
 import { buildDigest, localDateKey } from "./digest.js";
 import { summary } from "./status.js";
 import { syncCalendar, calState, inCalendar } from "./calendar.js";
@@ -87,7 +87,9 @@ export function startServer(getClient) {
     }
     const messages = store.recentMessages(chatId, 80);
     for (const m of messages) if (m.media_type && isQueued(m.id)) m.media_status = "downloading";
-    res.json({ chatId, messages });
+    let phone = phoneFor(chatId);
+    if (!phone) { await resolvePhones([chatId]); phone = phoneFor(chatId); }
+    res.json({ chatId, phone, messages });
   });
   // Diagnostic: what WhatsApp attaches to a raw message (used to locate preview thumbnails). Local only.
   app.get("/api/debug/msg/:id", async (req, res) => {
@@ -205,6 +207,8 @@ const PAGE = /* html */ `<!doctype html>
   .cl{flex:1;overflow:auto}.ci{padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.5);cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:2px 8px;transition:background .12s}
   .ci:hover{background:rgba(255,255,255,.45)}.ci.on{background:rgba(27,122,74,.14)}.ci b{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ci .t{font-size:11.5px;color:var(--muted)}
   .ci .p{grid-column:1/3;font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ci .ph{grid-column:1/3;justify-self:start;font-size:12px;color:var(--muted);direction:ltr;unicode-bidi:isolate;letter-spacing:.01em}
+  .ph .pn{display:table;font-size:12px;font-weight:400;color:var(--muted);direction:ltr;unicode-bidi:isolate;margin-top:1px}
   .ci .u{background:var(--accent);color:#fff;border-radius:99px;font-size:11px;padding:1px 7px;justify-self:end}
   .cempty{flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);border-radius:var(--r);background:var(--glass2);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);border:1px solid var(--line)}
   /* numbers & links */
@@ -275,7 +279,7 @@ const PAGE = /* html */ `<!doctype html>
 </div>
 <div id="chatsview"><div class="clist"><input id="csearch" placeholder="חיפוש צ'אט…" oninput="renderChats()"><div class="cl" id="clist"></div></div><div id="cslot" class="cempty">בוחרים צ'אט מהרשימה</div></div>
 </main>
-<div id="panel"><div class="ph"><b id="pname"></b><span id="pstatus" class="stat"></span><button onclick="closeChat()">סגירה</button></div>
+<div id="panel"><div class="ph"><b id="pname"><span id="pname-t"></span><span class="pn" id="pphone"></span></b><span id="pstatus" class="stat"></span><button onclick="closeChat()">סגירה</button></div>
 <div class="msgs" id="pmsgs"></div><div class="sent" id="psent"></div>
 <div class="compose"><textarea id="ptext" placeholder="לכתוב הודעה… (Enter לשליחה, Shift+Enter לשורה חדשה)"></textarea><button class="primary" onclick="sendMsg()">שליחה</button></div></div>
 <script>
@@ -352,20 +356,21 @@ function setView(v){ view=v; localStorage.setItem('view',v); document.body.class
   const panel=document.getElementById('panel');
   if(v==='chats'){ if(cur){ const slot=document.getElementById('cslot'); if(slot) slot.replaceWith(panel); panel.classList.add('open'); } else panel.classList.remove('open'); loadChats(); clearInterval(ctimer); ctimer=setInterval(loadChats,20000); }
   else { clearInterval(ctimer); if(panel.parentElement!==document.body){ const slot=document.createElement('div'); slot.id='cslot'; slot.className='cempty'; slot.textContent='בוחרים צ\\'אט מהרשימה'; panel.replaceWith(slot); document.body.appendChild(panel); } closeChat(); } }
-async function loadChats(){ try{ chats=await (await fetch('/api/chats')).json(); }catch{ return; } if(cur&&cur.name===cur.chatId){ const c=chats.find(x=>x.id===cur.chatId); if(c){ cur.name=c.name; document.getElementById('pname').textContent=c.name; } } renderChats(); }
+async function loadChats(){ try{ chats=await (await fetch('/api/chats')).json(); }catch{ return; } if(cur&&cur.name===cur.chatId){ const c=chats.find(x=>x.id===cur.chatId); if(c){ cur.name=c.name; document.getElementById('pname-t').textContent=c.name; } } renderChats(); }
 function renderChats(){ const q=(document.getElementById('csearch').value||'').trim().toLowerCase(); const list=chats.filter(c=>!q||(c.name||'').toLowerCase().includes(q)||(c.last_body||'').toLowerCase().includes(q));
-  document.getElementById('clist').innerHTML=list.map(c=>'<div class="ci '+(cur&&cur.chatId===c.id?'on':'')+'" onclick="openChatById(\\''+esc(c.id)+'\\')"><b>'+esc(c.name||c.id)+'</b><span class="t">'+(c.timestamp?fmtChatTime(c.timestamp):'')+'</span><span class="p">'+(c.last_from_me?'את: ':'')+esc(c.last_body||'')+'</span>'+(c.unread?'<span class="u">'+c.unread+'</span>':'')+'</div>').join('')||'<div class="stat" style="padding:14px">אין צ\\'אטים להצגה.</div>'; }
+  document.getElementById('clist').innerHTML=list.map(c=>'<div class="ci '+(cur&&cur.chatId===c.id?'on':'')+'" onclick="openChatById(\\''+esc(c.id)+'\\')"><b>'+esc(c.name||c.id)+'</b><span class="t">'+(c.timestamp?fmtChatTime(c.timestamp):'')+'</span>'+(c.phone&&c.phone!==c.name?'<span class="ph">'+esc(c.phone)+'</span>':'')+'<span class="p">'+(c.last_from_me?'את: ':'')+esc(c.last_body||'')+'</span>'+(c.unread?'<span class="u">'+c.unread+'</span>':'')+'</div>').join('')||'<div class="stat" style="padding:14px">אין צ\\'אטים להצגה.</div>'; }
 function fmtChatTime(ts){ const d=new Date(ts*1000), now=new Date(); return d.toDateString()===now.toDateString()?d.toLocaleTimeString(L,{hour:'2-digit',minute:'2-digit'}):d.toLocaleDateString(L,{day:'numeric',month:'short'}); }
 async function openChatById(chatId){ const c=chats.find(x=>x.id===chatId); await showChat({chatId, name:c?c.name:chatId, msgId:null}); renderChats(); }
 async function openChat(itemId){ const it=S.items.find(i=>i.id===itemId); if(!it||!it.chat_id){ alert('הפריט הזה לא מקושר לצ\\'אט.'); return; }
   await showChat({chatId:it.chat_id,name:it.chat_name||it.who||it.chat_id,msgId:it.source_msg_id}); }
 async function showChat(c){ cur=c; const panel=document.getElementById('panel');
   if(view==='chats'&&panel.parentElement===document.body){ const slot=document.getElementById('cslot'); if(slot) slot.replaceWith(panel); }
-  document.getElementById('pname').textContent=cur.name; document.getElementById('pmsgs').innerHTML='<div class="stat">טוען…</div>';
+  document.getElementById('pname-t').textContent=cur.name; document.getElementById('pphone').textContent=''; document.getElementById('pmsgs').innerHTML='<div class="stat">טוען…</div>';
   panel.classList.add('open'); await loadChat(true); clearInterval(ptimer); ptimer=setInterval(()=>loadChat(false),8000); document.getElementById('ptext').focus(); }
 function closeChat(){ document.getElementById('panel').classList.remove('open'); clearInterval(ptimer); cur=null; }
 setView(view);
 async function loadChat(scroll){ if(!cur) return; const id=cur.chatId; let d; try{ d=await (await fetch('/api/chats/'+encodeURIComponent(id)+'/messages')).json(); }catch{ return; } if(!cur||cur.chatId!==id) return;
+  if(d.phone&&d.phone!==cur.name) document.getElementById('pphone').textContent=d.phone;
   const box=document.getElementById('pmsgs'); const atBottom=box.scrollHeight-box.scrollTop-box.clientHeight<40;
   // never rebuild the list while a voice note or video is playing (it would restart it), and only rebuild when something changed
   if([...box.querySelectorAll('audio,video')].some(el=>!el.paused&&!el.ended)) return;

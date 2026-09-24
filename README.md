@@ -50,7 +50,8 @@ close it (or press Ctrl+C) to stop.
 
 Three views at the top: **משימות** (tasks: the meetings and follow-ups), **מספרים וקישורים**
 (numbers and links, see below) and **צ'אטים** (chats):
-a WhatsApp-Web-style list of all chats with search, last message and unread count. Clicking a
+a WhatsApp-Web-style list of all chats with search, last message, unread count, and the
+contact's phone number under the name (also shown in the conversation header). Clicking a
 chat opens the conversation next to it, and you can write and send from there.
 
 - **Today / Upcoming / Overdue / Follow-ups / No date** tabs.
