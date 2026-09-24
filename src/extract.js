@@ -1,6 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
+import fs from "node:fs";
 import { z } from "zod";
 import { config } from "./config.js";
+import * as store from "./db.js";
 
 let ai = null;
 const client = () => (ai ??= new GoogleGenAI({ apiKey: config.geminiKey }));
@@ -66,6 +68,8 @@ Rules:
 - Resolve relative dates ("tomorrow", "next Tuesday", "in two weeks") using the timestamp of the message that said it and the given timezone. If ambiguous, pick the most likely and set confidence to medium or low.
 - Ignore small talk, jokes, past events already over, forwarded marketing, and vague "we should catch up sometime" unless a concrete time or promise is attached.
 - A single message can produce several items. Both sides' messages count: something the other person will do for Me is a follow_up to check on.
+- Attachments: some messages are images or files. Small previews of images are attached to this request, labelled IMG1, IMG2... matching the [IMG1] tags in the message list. Look at them: a screenshot of a bank transfer / payment confirmation, a signed form, a receipt, or the document someone asked for usually means the related follow-up is DONE (Me sent the proof, or they sent what Me was waiting for). Use action "done" with the existing_id in that case. A photo unrelated to any open item is just ignored.
+- A file (PDF etc.) or image from Me sent shortly after someone gave bank details or asked Me to send something is very likely the thing they asked for - treat the follow-up as done unless the text says otherwise.
 - A time that one side only PROPOSED ("are you free today at 13:00?", "let's talk this evening") and the other side never confirmed is tentative: set confidence to "low" and start the notes with "מוצע, לא אושר". If the proposal was answered with a different time, use the agreed time.
 - Titles are short and specific. Notes hold the detail. Do not invent details not in the messages.
 - Return an empty items list when there is nothing actionable.
@@ -78,10 +82,31 @@ function fmtTs(ts, tz) {
   });
 }
 
-function renderMessages(msgs, tz) {
+function renderMessages(msgs, tz, tags = new Map()) {
   return msgs
-    .map((m) => `[${m.id}] ${fmtTs(m.ts, tz)} | ${m.from_me ? "Me" : m.sender || "Them"}: ${m.body.replace(/\s+/g, " ").trim()}`)
+    .map((m) => `[${m.id}] ${fmtTs(m.ts, tz)} | ${m.from_me ? "Me" : m.sender || "Them"}: ${m.body.replace(/\s+/g, " ").trim()}${tags.has(m.id) ? ` [${tags.get(m.id)}]` : ""}`)
     .join("\n");
+}
+
+// Small previews of images in this batch (the thumbnails WhatsApp ships with the message, or the
+// downloaded file if the user fetched it). Nothing is downloaded for this; cap keeps the request small.
+const MAX_IMAGES = 4;
+function imageParts(msgs) {
+  const parts = [];
+  const tags = new Map();
+  for (const m of msgs) {
+    if (parts.length >= MAX_IMAGES || m.media_type !== "image") continue;
+    const row = store.getMedia(m.id);
+    if (!row || !row.path || !fs.existsSync(row.path)) continue;
+    try {
+      const buf = fs.readFileSync(row.path);
+      if (buf.length > 600 * 1024) continue;
+      const tag = `IMG${parts.length + 1}`;
+      tags.set(m.id, tag);
+      parts.push({ text: `${tag}:` }, { inlineData: { mimeType: row.mimetype || "image/jpeg", data: buf.toString("base64") } });
+    } catch {}
+  }
+  return { parts, tags };
 }
 
 // Free-tier keys allow only a few requests per minute, so space calls out.
@@ -127,12 +152,13 @@ const CALL_TIMEOUT_MS = 90_000;
 const withDeadline = (p, ms) =>
   Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error("fetch failed [timeout after 90s]"), { code: "ETIMEDOUT" })), ms))]);
 
-async function generate({ system, prompt, schema }) {
+async function generate({ system, prompt, schema, extraParts = [] }) {
+  const contents = extraParts.length ? [{ role: "user", parts: [{ text: prompt }, ...extraParts] }] : prompt;
   const call = (model) =>
     withDeadline(
       client().models.generateContent({
         model,
-        contents: prompt,
+        contents,
         config: { systemInstruction: system, responseMimeType: "application/json", responseJsonSchema: schema, temperature: 0.2, httpOptions: { timeout: CALL_TIMEOUT_MS } },
       }),
       CALL_TIMEOUT_MS + 5000,
@@ -203,6 +229,7 @@ ${renderMessages(msgs, tz)}`;
 
 export async function extractItems({ chatName, contextMsgs, newMsgs, existingItems }) {
   const tz = config.timezone;
+  const { parts, tags } = imageParts(newMsgs);
   const now = fmtTs(Math.floor(Date.now() / 1000), tz);
   const existing = existingItems.length
     ? JSON.stringify(existingItems.map((i) => ({ id: i.id, type: i.type, title: i.title, who: i.who, when_iso: i.when_iso, when_text: i.when_text, notes: i.notes })))
@@ -219,9 +246,9 @@ Earlier messages (already processed, for context only - do not extract from thes
 ${contextMsgs.length ? renderMessages(contextMsgs, tz) : "(none)"}
 
 NEW messages to process:
-${renderMessages(newMsgs, tz)}`;
+${renderMessages(newMsgs, tz, tags)}`;
 
-  const response = await generate({ system: SYSTEM, prompt, schema: RESPONSE_JSON_SCHEMA });
+  const response = await generate({ system: SYSTEM, prompt, schema: RESPONSE_JSON_SCHEMA, extraParts: parts });
 
   const text = response.text;
   if (!text) {

@@ -66,7 +66,11 @@ chat opens the conversation next to it, and you can write and send from there.
 - **Today's agenda** shows the same text the daily WhatsApp digest sends.
 
 If a chat later reschedules or cancels something, the item is updated instead of
-duplicated. When someone says "sent it" / "done", the follow-up is closed.
+duplicated. When someone says "sent it" / "done", the follow-up is closed. Images count too:
+the analysis receives the small preview WhatsApp ships with every image (nothing is downloaded),
+so a screenshot of a bank transfer, a receipt or the requested document closes the matching
+follow-up. Files without a preview (PDFs) are judged by context: a file you send right after
+being asked for something is taken as that thing.
 
 **Click an item's title** to open that chat in a side panel. You see the recent
 messages from the linked account, the message the item came from is highlighted, and
@@ -144,7 +148,7 @@ the tracker reconnects to WhatsApp on its own.
 
 ## Good to know
 
-- **Privacy:** message text from the chats you allow is sent to Google's Gemini API for
+- **Privacy:** message text from the chats you allow, plus the small image previews, is sent to Google's Gemini API for
   extraction. Everything else stays on this Mac in `data/`. Use `ONLY_CHATS` to limit it.
 - **Free Gemini keys are rate-limited.** The app spaces its requests out, so the first
   read of a busy account takes a while (a few messages a minute). The dashboard header
