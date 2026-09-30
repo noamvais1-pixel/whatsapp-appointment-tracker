@@ -98,6 +98,7 @@ async function download(id) {
     }
   }
   store.saveMedia({ msg_id: id, status: "ok", mimetype, filename: m.filename || msg._data?.filename || null, path: file, size: buf.length });
+  makePreview(id).catch(() => {});
 }
 
 export const isQueued = (id) => queued.has(id);
@@ -111,6 +112,47 @@ export function rememberThumb(rec) {
     fs.writeFileSync(file, Buffer.from(rec.thumb, "base64"));
     store.saveMedia({ msg_id: rec.id, status: "thumb", mimetype: "image/jpeg", path: file, size: null });
   } catch {}
+}
+
+/**
+ * First-page / first-frame preview of a downloaded document or video, made by macOS Quick Look
+ * (the same previews Finder shows). Returns the PNG path or null.
+ */
+export async function makePreview(id) {
+  const row = store.getMedia(id);
+  if (!row || row.status !== "ok" || !row.path || !fs.existsSync(row.path)) return null;
+  if (row.thumb && fs.existsSync(row.thumb)) return row.thumb;
+  const mime = row.mimetype || "";
+  if (mime.startsWith("image/") || mime.startsWith("audio/")) return null;
+  const outDir = path.join(MEDIA_DIR, "previews");
+  fs.mkdirSync(outDir, { recursive: true });
+  try {
+    await run("qlmanage", ["-t", "-s", "640", "-o", outDir, row.path]);
+    const made = path.join(outDir, path.basename(row.path) + ".png");
+    if (!fs.existsSync(made)) return null;
+    store.setMediaThumb(id, made);
+    return made;
+  } catch {
+    return null;
+  }
+}
+
+/** Quick Look preview for a file that is about to be sent (not stored anywhere). Returns PNG bytes or null. */
+export async function previewBytes(name, base64) {
+  const tmpDir = path.join(MEDIA_DIR, "tmp");
+  fs.mkdirSync(tmpDir, { recursive: true });
+  const ext = (path.extname(name || "") || ".bin").toLowerCase();
+  const file = path.join(tmpDir, `${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
+  try {
+    fs.writeFileSync(file, Buffer.from(base64, "base64"));
+    await run("qlmanage", ["-t", "-s", "480", "-o", tmpDir, file]);
+    const png = file + ".png";
+    return fs.existsSync(png) ? fs.readFileSync(png) : null;
+  } catch {
+    return null;
+  } finally {
+    for (const f of [file, file + ".png"]) { try { fs.rmSync(f, { force: true }); } catch {} }
+  }
 }
 
 /** Open a downloaded file with the Mac's default app (Preview, QuickTime, PDF viewer...). */

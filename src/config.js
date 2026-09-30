@@ -30,6 +30,8 @@ export const config = {
   calendarMeetingMinutes: Number(process.env.CALENDAR_MEETING_MINUTES || 60),
   calendarCallMinutes: Number(process.env.CALENDAR_CALL_MINUTES || 30),
   calendarAlarmMinutes: Number(process.env.CALENDAR_ALARM_MINUTES ?? 30),
+  autoUpdate: (process.env.AUTO_UPDATE || "true").toLowerCase() !== "false",
+  autoUpdateHours: Number(process.env.AUTO_UPDATE_HOURS || 24),
   noReplyHours: Number(process.env.NO_REPLY_HOURS ?? 24),
   autoClosePastHours: Number(process.env.AUTO_CLOSE_PAST_HOURS ?? 12),
   dailyDigestTime: process.env.DAILY_DIGEST_TIME || "",

@@ -9,6 +9,7 @@ import { closePastAppointments } from "./expire.js";
 import { heartbeat } from "./whatsapp.js";
 import { summary } from "./status.js";
 import { syncCalendar } from "./calendar.js";
+import { startUpdater } from "./updater.js";
 import { notify } from "./notify.js";
 
 if (!config.geminiKey) {
@@ -68,6 +69,8 @@ if (config.dailyDigestTime) {
     }
   }, 30_000);
 }
+
+startUpdater();
 
 // Mirror meetings and calls into the Mac Calendar (which iCloud carries to the iPhone).
 setTimeout(() => syncCalendar(), 30_000);

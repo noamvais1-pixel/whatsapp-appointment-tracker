@@ -99,6 +99,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { retries = 0 }
 
+    // File picker for the attach button (WKWebView needs the host app to show the panel).
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.beginSheetModal(for: window) { resp in
+            completionHandler(resp == .OK ? panel.urls : nil)
+        }
+    }
+
     // JavaScript dialogs (the dashboard uses confirm/prompt/alert).
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
         let a = NSAlert(); a.messageText = message; a.addButton(withTitle: "אישור"); a.runModal(); completionHandler()

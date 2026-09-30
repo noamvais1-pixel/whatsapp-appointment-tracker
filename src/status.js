@@ -1,5 +1,6 @@
 import { state } from "./whatsapp.js";
 import * as store from "./db.js";
+import { updState } from "./updater.js";
 
 const MIN = 60_000;
 const ago = (t) => (t ? Math.round((Date.now() - t) / MIN) : null);
@@ -32,6 +33,14 @@ export function summary() {
     `ניתוח אחרון שהצליח: ${agoText(h.lastGeminiOkAt)}`,
     `ממתינות לניתוח: ${stats.pending}`,
     `בדיקת "לא ענו" אחרונה: ${agoText(h.lastNoReplyCheckAt)}`,
+    updState.enabled
+      ? `עדכונים: נבדק ${agoText(updState.lastCheckAt)}` +
+        (updState.current ? ` · גרסה ${updState.current}` : "") +
+        (updState.lastResult === "local-changes" ? " · יש גרסה חדשה אבל שינויים מקומיים חוסמים" :
+         updState.lastResult === "postponed" ? " · גרסה חדשה תותקן כשהתוכנה תתפנה" :
+         updState.lastResult === "error" ? ` · שגיאה: ${updState.lastError}` :
+         updState.lastResult === "up-to-date" ? " · מעודכן" : "")
+      : "עדכונים אוטומטיים: כבוי",
   ];
 
   if (state.status === "qr") return { level: "bad", text: "לא מחובר - צריך לסרוק את קוד ה-QR בטלפון", details };

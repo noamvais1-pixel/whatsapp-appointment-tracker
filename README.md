@@ -50,8 +50,8 @@ close it (or press Ctrl+C) to stop.
 
 Three views at the top: **משימות** (tasks: the meetings and follow-ups), **מספרים וקישורים**
 (numbers and links, see below) and **צ'אטים** (chats):
-a WhatsApp-Web-style list of all chats with search, last message, unread count, and the
-contact's phone number under the name (also shown in the conversation header). Clicking a
+a WhatsApp-Web-style list of all chats with search, last message and unread count. Opening a
+chat shows the contact's phone number under the name in the conversation header. Clicking a
 chat opens the conversation next to it, and you can write and send from there.
 
 - **Today / Upcoming / Overdue / Follow-ups / No date** tabs.
@@ -60,8 +60,15 @@ chat opens the conversation next to it, and you can write and send from there.
 - **Voice notes, images, videos and files** show inside the conversation as a blurred preview
   with a **download** button. Nothing is fetched by itself, only what you click. Once downloaded:
   a voice note with a player, an image (click to open full size in Preview), a video player, and a
-  file button that opens the file in the right Mac app. Downloads are kept in `data/media`. Files
+  file button that opens the file in the right Mac app. Documents (PDF, Word...) and videos get a
+first-page preview after download, like Finder shows; before download WhatsApp provides no preview
+for documents, so only the file name is shown. Downloads are kept in `data/media`. Files
   over 40 MB are skipped, and very old media WhatsApp no longer holds says so, with a retry.
+- **Sending images and files:** in the conversation, click 📎, drag a file onto the chat, or
+  paste an image (Cmd+V) into the text box. The file shows above the box with a preview (the image,
+or the first page of a document) and a remove button;
+  whatever you type is sent as the caption. JPG/PNG/WebP/GIF go as images, everything else as a
+  document. Up to 45 MB.
 - Add your own items with the box at the top.
 - **Check new messages now** re-reads recent chat history from WhatsApp and extracts anything pending right away.
 - **Today's agenda** shows the same text the daily WhatsApp digest sends.
@@ -84,6 +91,11 @@ phone, so to use a separate calendar create it on the iPhone under iCloud first,
 calendar show a "📅 ביומן" badge. Meetings are 60 minutes, calls 30, with a 30-minute alert
 (all adjustable in `.env`). Date changes move the event, cancellations delete it, done items
 keep it. Follow-ups are not added. macOS asks once for permission to control Calendar.
+
+**Deleted and edited messages.** Every message is stored the moment it arrives. If the sender
+later deletes it for everyone, it vanishes on the phone but stays here, marked in red with the
+deletion time. Edited messages show the new text with an "edited" marker; hover to see the
+original. This only covers messages that arrived while the app was running.
 
 **Past appointments.** A meeting or call whose time passed more than 12 hours ago
 (`AUTO_CLOSE_PAST_HOURS`): a confirmed one is closed as "done" and moves to the done tab;
@@ -131,6 +143,7 @@ Endpoints: `GET /api/refs` (JSON) and `GET /api/refs/export` (plain text).
 | `ONLY_CHATS` / `SKIP_CHATS` | Comma-separated contact names or numbers to include / exclude. |
 | `CALENDAR_NAME` | Mac calendar that receives meetings and calls. `CALENDAR_SYNC=false` turns it off. |
 | `CALENDAR_MEETING_MINUTES` / `CALENDAR_CALL_MINUTES` / `CALENDAR_ALARM_MINUTES` | Event lengths and the alert, in minutes. |
+| `AUTO_UPDATE` / `AUTO_UPDATE_HOURS` | Self-update from GitHub and how often to check. |
 | `DAILY_DIGEST_TIME` | e.g. `08:00` to get the day's agenda in your own WhatsApp chat ("You"). Blank = off. |
 | `GEMINI_MODEL` | Which Gemini model to use. `gemini-3.5-flash-lite` (default) is the only one a free key can use all day: a free key gets just ~20 requests a day on `gemini-3.5-flash` or `gemini-3.8-flash`. With billing enabled, switch to one of those. |
 | `GEMINI_MIN_INTERVAL_MS` | Gap between Gemini requests. `13000` suits a free key; lower it to `1000` if you enable billing. |
@@ -178,6 +191,14 @@ last successful link check, last message received, last successful analysis, mes
 A Mac notification is sent when the state changes from working to not working, or back.
 After the Mac sleeps, the app checks the link immediately and reconnects on its own.
 
+## Self-update
+
+Once a day (and 3 minutes after each start) the app checks the GitHub repository. When a newer
+version exists it pulls it, reinstalls dependencies (which re-applies the WhatsApp library patches)
+and restarts itself cleanly, with no new QR scan. The status strip shows the last check and the
+running version; **בדיקת עדכונים** in the header checks immediately. `AUTO_UPDATE=false` turns it
+off. Updates are skipped while the local copy has uncommitted code changes, so nothing is lost.
+
 ## If something stops working
 
 The app checks itself. If WhatsApp changes something and chats can no longer be read, a red
@@ -188,7 +209,7 @@ arrives days or weeks after the change. When the red banner appears, the app nee
 
 ## If chat reading breaks after a WhatsApp update
 
-The `patches/` folder holds a fix for the WhatsApp library (upstream pull request #201850)
+The `patches/` folder holds fixes for the WhatsApp library (upstream pull requests #201850 chat list, #201923 sending media, #201697 and #201932 downloading media)
 that is re-applied automatically after `npm install`. If chats stop loading with an error
 that just says "r", check whether a newer `whatsapp-web.js` release includes the fix.
 

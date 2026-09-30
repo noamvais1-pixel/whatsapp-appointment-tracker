@@ -59,6 +59,14 @@ db.exec(`CREATE TABLE IF NOT EXISTS media (
   mimetype TEXT, filename TEXT, path TEXT, size INTEGER, error TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`);
+if (!db.prepare("PRAGMA table_info(media)").all().some((c) => c.name === "thumb")) {
+  db.exec("ALTER TABLE media ADD COLUMN thumb TEXT"); // Quick Look preview of a downloaded document/video
+}
+// Deleted-for-everyone and edited messages keep their original text; these columns record what happened.
+for (const col of ["deleted_at TEXT", "edited_from TEXT"]) {
+  const name = col.split(" ")[0];
+  if (!db.prepare("PRAGMA table_info(messages)").all().some((c) => c.name === name)) db.exec(`ALTER TABLE messages ADD COLUMN ${col}`);
+}
 if (!db.prepare("PRAGMA table_info(messages)").all().some((c) => c.name === "media_type")) {
   db.exec("ALTER TABLE messages ADD COLUMN media_type TEXT");
 }
@@ -80,13 +88,16 @@ const stmts = {
     `INSERT OR IGNORE INTO messages (id, chat_id, chat_name, from_me, sender, body, ts, processed, media_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ),
   setMediaType: db.prepare(`UPDATE messages SET media_type = ? WHERE id = ? AND media_type IS NULL`),
+  markDeleted: db.prepare(`UPDATE messages SET deleted_at = COALESCE(deleted_at, datetime('now')) WHERE id = ?`),
+  markEdited: db.prepare(`UPDATE messages SET edited_from = COALESCE(edited_from, ?), body = ? WHERE id = ?`),
   recentMessages: db.prepare(
-    `SELECT m.*, md.status AS media_status, md.mimetype AS media_mime, md.filename AS media_filename, md.size AS media_size, md.error AS media_error
+    `SELECT m.*, md.status AS media_status, md.mimetype AS media_mime, md.filename AS media_filename, md.size AS media_size, md.error AS media_error, (md.thumb IS NOT NULL) AS media_thumb
        FROM messages m LEFT JOIN media md ON md.msg_id = m.id WHERE m.chat_id = ? ORDER BY m.ts DESC LIMIT ?`,
   ),
   getMedia: db.prepare(`SELECT * FROM media WHERE msg_id = ?`),
   saveMedia: db.prepare(`INSERT OR REPLACE INTO media (msg_id, status, mimetype, filename, path, size, error) VALUES (?, ?, ?, ?, ?, ?, ?)`),
   deleteMedia: db.prepare(`DELETE FROM media WHERE msg_id = ?`),
+  setMediaThumb: db.prepare(`UPDATE media SET thumb = ? WHERE msg_id = ?`),
   staleFailedMedia: db.prepare(
     `SELECT md.msg_id FROM media md JOIN messages m ON m.id = md.msg_id
       WHERE md.status = 'failed' AND m.chat_id = ? AND m.ts >= ? AND md.created_at < datetime('now', '-30 minutes')`,
@@ -153,9 +164,12 @@ export function saveMessage(m, processed = 0) {
   if (r.changes === 0 && m.mediaType) stmts.setMediaType.run(m.mediaType, m.id); // older rows saved before media support
   return r.changes > 0;
 }
+export const markDeleted = (id) => stmts.markDeleted.run(id).changes;
+export const markEdited = (id, newBody, prevBody) => stmts.markEdited.run(prevBody, newBody, id).changes;
 export const getMedia = (id) => stmts.getMedia.get(id);
 export const saveMedia = (r) => stmts.saveMedia.run(r.msg_id, r.status, r.mimetype ?? null, r.filename ?? null, r.path ?? null, r.size ?? null, r.error ?? null);
 export const deleteMedia = (id) => stmts.deleteMedia.run(id);
+export const setMediaThumb = (id, path) => stmts.setMediaThumb.run(path, id);
 export const staleFailedMedia = (chatId, sinceTs) => stmts.staleFailedMedia.all(chatId, sinceTs).map((r) => r.msg_id);
 export const recentMessages = (chatId, limit = 60) => stmts.recentMessages.all(chatId, limit).reverse();
 export const unprocessedChats = () => stmts.unprocessedChats.all();

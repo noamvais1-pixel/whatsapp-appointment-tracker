@@ -252,6 +252,31 @@ function createClient({ onReady } = {}) {
     setTimeout(() => resolveAllPhones(), 60_000);
   });
 
+  // "Delete for everyone": WhatsApp removes the text on the phone, but we already have it. Keep it, mark it.
+  client.on("message_revoke_everyone", async (msg, before) => {
+    try {
+      const id = before?.id?._serialized || msg.protocolMessageKey?._serialized || msg.id?._serialized;
+      if (!id) return;
+      if (before) {
+        // if the app somehow missed the original (e.g. arrived during a reconnect), store it now from the library's cache
+        const chat = await msg.getChat().catch(() => null);
+        if (chat && chatAllowed(chat)) { const rec = toRecord(before, chat); if (rec) storeRecord(rec); }
+      }
+      const n = store.markDeleted(id);
+      console.log(`[msg] deleted for everyone ${n ? "(original kept)" : "(original not stored)"}: ${id.slice(-20)}`);
+    } catch (e) {
+      console.warn("[whatsapp] revoke handling:", String(e.message).slice(0, 100));
+    }
+  });
+
+  // Edited messages: keep the original text alongside the new one.
+  client.on("message_edit", (msg, newBody, prevBody) => {
+    try {
+      const id = msg.id?._serialized;
+      if (id && typeof newBody === "string") store.markEdited(id, newBody, prevBody ?? null);
+    } catch {}
+  });
+
   // message_create fires for both incoming and outgoing messages
   client.on("message_create", async (msg) => {
     try {
