@@ -153,6 +153,24 @@ export function startServer(getClient) {
     catch (e) { res.status(404).json({ error: e.message }); }
   });
   app.post("/api/media/:id/retry", (req, res) => { requestMedia(req.params.id); res.json({ ok: true }); });
+  // Start a chat with a number that may not be in the list yet ("050-1234567", "+972 50…", "+1 …").
+  app.post("/api/chats/by-number", async (req, res) => {
+    let digits = String(req.body?.number || "").replace(/\D/g, "");
+    if (digits.startsWith("00")) digits = digits.slice(2);
+    else if (digits.startsWith("0")) digits = "972" + digits.slice(1); // Israeli local format
+    if (digits.length < 8 || digits.length > 15) return res.status(400).json({ error: "bad number" });
+    const known = store.chatByPhone(digits); // an existing chat (usually an "@lid" id) with this number
+    if (known) return res.json({ chatId: known, phone: store.fmtPhone(digits), existing: true });
+    const client = getClient?.();
+    if (!client || state.status !== "ready") return res.status(409).json({ error: "WhatsApp not linked" });
+    try {
+      const wid = await client.getNumberId(digits);
+      if (!wid) return res.status(404).json({ error: "not on WhatsApp", phone: store.fmtPhone(digits) });
+      res.json({ chatId: wid._serialized, phone: store.fmtPhone(digits), existing: false });
+    } catch (e) {
+      res.status(500).json({ error: String(e.message).slice(0, 200) });
+    }
+  });
   app.post("/api/chats/:chatId/send", async (req, res) => {
     const text = String(req.body?.text || "").trim();
     if (!text) return res.status(400).json({ error: "empty message" });
@@ -242,6 +260,8 @@ const PAGE = /* html */ `<!doctype html>
   #chatsview{display:none}#chatsview.on{display:flex;gap:14px;align-items:stretch;height:calc(100vh - 230px);min-height:420px}
   .clist{width:340px;flex:none;border-radius:var(--r);display:flex;flex-direction:column;overflow:hidden;background:var(--glass);-webkit-backdrop-filter:blur(26px) saturate(160%);backdrop-filter:blur(26px) saturate(160%);border:1px solid var(--line);box-shadow:var(--shadow)}
   .clist input{margin:10px;border-radius:12px}
+  .csrow{display:flex;align-items:center}.csrow input{flex:1;min-width:0;margin-inline-end:6px}.csrow .newchat{margin-inline-end:10px;white-space:nowrap;font-size:13px}
+  .ci.nc b{color:var(--accent)}
   .cl{flex:1;overflow:auto}.ci{padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.5);cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:2px 8px;transition:background .12s}
   .ci:hover{background:rgba(255,255,255,.45)}.ci.on{background:rgba(27,122,74,.14)}.ci b{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ci .t{font-size:11.5px;color:var(--muted)}
   .ci .p{grid-column:1/3;font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -323,7 +343,7 @@ const PAGE = /* html */ `<!doctype html>
 <nav id="rtabs"></nav>
 <div id="rlist"></div>
 </div>
-<div id="chatsview"><div class="clist"><input id="csearch" placeholder="חיפוש צ'אט…" oninput="renderChats()"><div class="cl" id="clist"></div></div><div id="cslot" class="cempty">בוחרים צ'אט מהרשימה</div></div>
+<div id="chatsview"><div class="clist"><div class="csrow"><input id="csearch" placeholder="חיפוש צ'אט או מספר טלפון…" oninput="renderChats()"><button class="newchat" title="צ'אט חדש לפי מספר טלפון" onclick="newChatPrompt()">＋ מספר</button></div><div class="cl" id="clist"></div></div><div id="cslot" class="cempty">בוחרים צ'אט מהרשימה</div></div>
 </main>
 <div id="panel"><div class="ph"><b id="pname"><span id="pname-t"></span><span class="pn" id="pphone"></span></b><span id="pstatus" class="stat"></span><button onclick="closeChat()">סגירה</button></div>
 <div class="msgs" id="pmsgs"></div><div class="sent" id="psent"></div>
@@ -408,9 +428,18 @@ function setView(v){ view=v; localStorage.setItem('view',v); document.body.class
   if(v==='chats'){ if(cur){ const slot=document.getElementById('cslot'); if(slot) slot.replaceWith(panel); panel.classList.add('open'); } else panel.classList.remove('open'); loadChats(); clearInterval(ctimer); ctimer=setInterval(loadChats,20000); }
   else { clearInterval(ctimer); if(panel.parentElement!==document.body){ const slot=document.createElement('div'); slot.id='cslot'; slot.className='cempty'; slot.textContent='בוחרים צ\\'אט מהרשימה'; panel.replaceWith(slot); document.body.appendChild(panel); } closeChat(); } }
 async function loadChats(){ try{ chats=await (await fetch('/api/chats')).json(); }catch{ return; } if(cur&&cur.name===cur.chatId){ const c=chats.find(x=>x.id===cur.chatId); if(c){ cur.name=c.name; document.getElementById('pname-t').textContent=c.name; } } renderChats(); }
-function renderChats(){ const q=(document.getElementById('csearch').value||'').trim().toLowerCase(); const list=chats.filter(c=>!q||(c.name||'').toLowerCase().includes(q)||(c.last_body||'').toLowerCase().includes(q));
-  document.getElementById('clist').innerHTML=list.map(c=>'<div class="ci '+(cur&&cur.chatId===c.id?'on':'')+'" onclick="openChatById(\\''+esc(c.id)+'\\')"><b>'+esc(c.name||c.id)+'</b><span class="t">'+(c.timestamp?fmtChatTime(c.timestamp):'')+'</span>'+'<span class="p">'+(c.last_from_me?'את: ':'')+esc(c.last_body||'')+'</span>'+(c.unread?'<span class="u">'+c.unread+'</span>':'')+'</div>').join('')||'<div class="stat" style="padding:14px">אין צ\\'אטים להצגה.</div>'; }
+function renderChats(){ const q=(document.getElementById('csearch').value||'').trim().toLowerCase(); const qd=q.replace(/\\D/g,'').replace(/^0/,''); const list=chats.filter(c=>!q||(c.name||'').toLowerCase().includes(q)||(c.last_body||'').toLowerCase().includes(q)||(qd.length>=4&&(c.phone||'').replace(/\\D/g,'').includes(qd)));
+  const asNum=/^[+\\d][\\d\\s()\\-]{7,}$/.test(q)?'<div class="ci nc" onclick="startChatByNumber(document.getElementById(\\'csearch\\').value)"><b>💬 צ\\'אט חדש עם <bdi>'+esc(q)+'</bdi></b><span class="p">לפתוח שיחה עם המספר הזה, גם אם הוא לא ברשימה</span></div>':'';
+  document.getElementById('clist').innerHTML=asNum+list.map(c=>'<div class="ci '+(cur&&cur.chatId===c.id?'on':'')+'" onclick="openChatById(\\''+esc(c.id)+'\\')"><b>'+esc(c.name||c.id)+'</b><span class="t">'+(c.timestamp?fmtChatTime(c.timestamp):'')+'</span>'+'<span class="p">'+(c.last_from_me?'את: ':'')+esc(c.last_body||'')+'</span>'+(c.unread?'<span class="u">'+c.unread+'</span>':'')+'</div>').join('')||(asNum?'':'<div class="stat" style="padding:14px">אין צ\\'אטים להצגה.</div>'); }
 function fmtChatTime(ts){ const d=new Date(ts*1000), now=new Date(); return d.toDateString()===now.toDateString()?d.toLocaleTimeString(L,{hour:'2-digit',minute:'2-digit'}):d.toLocaleDateString(L,{day:'numeric',month:'short'}); }
+function newChatPrompt(){ const v=prompt('לאיזה מספר לשלוח? (למשל 050-1234567 או ‎+1 555 123 4567)'); if(v&&v.trim()) startChatByNumber(v); }
+async function startChatByNumber(num){ let r, j; try{ r=await fetch('/api/chats/by-number',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({number:num})}); j=await r.json().catch(()=>({})); }catch{ alert('אין תשובה מהתוכנה'); return; }
+  if(r.status===400){ alert('המספר לא נראה תקין. כותבים למשל 050-1234567.'); return; }
+  if(r.status===404){ alert('המספר '+(j.phone||num)+' לא רשום בוואטסאפ.'); return; }
+  if(r.status===409){ alert('וואטסאפ לא מחובר כרגע, אי אפשר לפתוח צ\\'אט חדש.'); return; }
+  if(!r.ok){ alert('לא הצלחתי לפתוח את הצ\\'אט: '+(j.error||r.status)); return; }
+  document.getElementById('csearch').value=''; const c=chats.find(x=>x.id===j.chatId);
+  await showChat({chatId:j.chatId, name:c?c.name:j.phone, msgId:null}); renderChats(); }
 async function openChatById(chatId){ const c=chats.find(x=>x.id===chatId); await showChat({chatId, name:c?c.name:chatId, msgId:null}); renderChats(); }
 async function openChat(itemId){ const it=S.items.find(i=>i.id===itemId); if(!it||!it.chat_id){ alert('הפריט הזה לא מקושר לצ\\'אט.'); return; }
   await showChat({chatId:it.chat_id,name:it.chat_name||it.who||it.chat_id,msgId:it.source_msg_id}); }

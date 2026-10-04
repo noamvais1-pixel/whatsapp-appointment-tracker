@@ -141,6 +141,7 @@ const stmts = {
   ),
   getPhone: db.prepare(`SELECT phone, updated_at FROM contacts WHERE chat_id = ?`),
   setPhone: db.prepare(`INSERT OR REPLACE INTO contacts (chat_id, phone) VALUES (?, ?)`),
+  chatByPhone: db.prepare(`SELECT chat_id FROM contacts WHERE phone = ? ORDER BY updated_at DESC LIMIT 1`),
   chatSummaries: db.prepare(
     `SELECT m.chat_id AS id, m.chat_name AS name, m.ts AS timestamp, m.body AS last_body, m.from_me AS last_from_me
        FROM messages m JOIN (SELECT chat_id, MAX(ts) AS mts FROM messages GROUP BY chat_id) x
@@ -233,6 +234,7 @@ export const lastMessagePerChat = () => stmts.lastMessagePerChat.all();
 export const chatSummaries = () => stmts.chatSummaries.all();
 export const getPhone = (chatId) => stmts.getPhone.get(chatId);
 export const setPhone = (chatId, phone) => stmts.setPhone.run(chatId, phone ?? null);
+export const chatByPhone = (digits) => stmts.chatByPhone.get(digits)?.chat_id || null;
 /** Israeli numbers as +972 5X-XXX-XXXX / +972 X-XXX-XXXX; anything else as +digits. */
 export function fmtPhone(digits) {
   if (!digits) return "";
