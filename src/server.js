@@ -10,7 +10,26 @@ import { openMedia, requestMedia, isQueued, makePreview, previewBytes } from "./
 import pkg from "whatsapp-web.js";
 const { MessageMedia } = pkg;
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFile } from "node:child_process";
 import { processPending } from "./processor.js";
+
+// Group messages often carry only the sender's WhatsApp id (…@lid); show the contact's name or number instead.
+const senderNames = new Map();
+async function nameGroupSenders(client, messages) {
+  const ids = [...new Set(messages.map((m) => m.sender).filter((s) => /@(lid|c\.us)$/.test(s || "") && !senderNames.has(s)))];
+  if (client && state.status === "ready") {
+    await Promise.all(ids.map(async (id) => {
+      try {
+        const c = await client.getContactById(id);
+        const num = c.number ? store.fmtPhone(c.number) : "";
+        senderNames.set(id, c.name || c.pushname || c.verifiedName || num || "");
+      } catch { senderNames.set(id, ""); }
+    }));
+  }
+  for (const m of messages) if (senderNames.get(m.sender)) m.sender = senderNames.get(m.sender);
+}
 
 export function startServer(getClient) {
   const app = express();
@@ -89,6 +108,32 @@ export function startServer(getClient) {
     }
   });
 
+  // Send a recording from the dashboard microphone as a WhatsApp voice note. Body: { mimetype, data (base64) }
+  // Browsers record webm/mp4; WhatsApp phones only play voice notes in Ogg/Opus, so convert with ffmpeg first.
+  app.post("/api/chats/:chatId/send-voice", async (req, res) => {
+    const { mimetype = "", data } = req.body || {};
+    if (!data) return res.status(400).json({ error: "missing recording" });
+    const client = getClient?.();
+    if (!client || state.status !== "ready") return res.status(409).json({ error: "WhatsApp not linked" });
+    const ff = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"].find((p) => fs.existsSync(p));
+    if (!ff) return res.status(500).json({ error: "חסר ffmpeg במחשב (brew install ffmpeg)" });
+    const tmp = path.join(os.tmpdir(), `voice-${Date.now()}`);
+    const ext = mimetype.includes("webm") ? "webm" : mimetype.includes("ogg") ? "ogg" : "m4a";
+    try {
+      fs.writeFileSync(`${tmp}.${ext}`, Buffer.from(data, "base64"));
+      await new Promise((ok, fail) => execFile(ff, ["-y", "-loglevel", "error", "-i", `${tmp}.${ext}`, "-vn", "-ac", "1", "-ar", "48000", "-c:a", "libopus", "-b:a", "32k", `${tmp}.ogg`], (e) => (e ? fail(e) : ok())));
+      const media = new MessageMedia("audio/ogg; codecs=opus", fs.readFileSync(`${tmp}.ogg`).toString("base64"), "voice.ogg");
+      await client.sendMessage(req.params.chatId, media, { sendAudioAsVoice: true });
+      store.closeNoReply(req.params.chatId, "you sent a voice note from the dashboard");
+      console.log(`[send] voice note -> ${req.params.chatId}`);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: String(e.message).slice(0, 200) });
+    } finally {
+      for (const f of [`${tmp}.${ext}`, `${tmp}.ogg`]) fs.rmSync(f, { force: true });
+    }
+  });
+
   app.get("/api/chats", async (req, res) => res.json(await listChats()));
 
   // Numbers and links found in the chat history (phones, bank details, IDs, references, addresses, URLs).
@@ -120,8 +165,9 @@ export function startServer(getClient) {
     }
     const messages = store.recentMessages(chatId, 80);
     for (const m of messages) if (m.media_type && isQueued(m.id)) m.media_status = "downloading";
+    if (chatId.endsWith("@g.us")) await nameGroupSenders(client, messages);
     let phone = phoneFor(chatId);
-    if (!phone) { await resolvePhones([chatId]); phone = phoneFor(chatId); }
+    if (!phone && !chatId.endsWith("@g.us")) { await resolvePhones([chatId]); phone = phoneFor(chatId); }
     res.json({ chatId, phone, messages });
   });
   // Diagnostic: what WhatsApp attaches to a raw message (used to locate preview thumbnails). Local only.
@@ -297,6 +343,8 @@ const PAGE = /* html */ `<!doctype html>
   .b{max-width:82%;padding:8px 11px;border-radius:16px;font-size:14px;white-space:pre-wrap;word-break:break-word;align-self:flex-start;
     background:rgba(255,255,255,.78);border:1px solid rgba(255,255,255,.7);box-shadow:0 2px 8px rgba(25,35,70,.08);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
   .b.me{background:rgba(205,248,214,.82);align-self:flex-end}.b .t{display:block;font-size:11px;color:var(--muted);margin-top:3px;text-align:left}
+  /* each line takes its direction from its own text, so English ends with its punctuation and Hebrew stays RTL */
+  .b .tx,textarea,input:not([type]){unicode-bidi:plaintext;text-align:start}
   .b.hl{outline:2px solid var(--accent)}
   .b.del{border-color:rgba(180,71,29,.45)}.b .flag{display:block;font-size:11px;color:var(--warn);margin-top:3px}.b .flag.ed{color:var(--muted);cursor:help}
   .compose{display:flex;gap:8px;padding:10px 12px;border-top:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.25)}.compose textarea{flex:1;resize:none;height:44px}
@@ -306,6 +354,9 @@ const PAGE = /* html */ `<!doctype html>
   .attach .nm{display:flex;flex-direction:column;gap:2px}
   .attach .x{cursor:pointer;color:var(--muted)}.attach .x:hover{color:var(--warn)}
   .compose .clip{padding:0 12px;font-size:18px;line-height:1}
+  .compose .clip.rec{background:#e5484d;color:#fff;border-color:#e5484d}
+  .attach .recdot{width:12px;height:12px;border-radius:50%;background:#e5484d;animation:recblink 1s infinite}@keyframes recblink{50%{opacity:.25}}
+  .attach audio{height:36px;max-width:260px}
   #panel.drop .msgs{outline:3px dashed var(--accent);outline-offset:-8px}
   .mimg{max-width:260px;max-height:280px;border-radius:12px;display:block;cursor:zoom-in;margin-bottom:4px}
   .maud{width:260px;display:block;margin-bottom:4px}.mvid{max-width:260px;border-radius:12px;display:block;margin-bottom:4px}
@@ -348,10 +399,11 @@ const PAGE = /* html */ `<!doctype html>
 <div id="panel"><div class="ph"><b id="pname"><span id="pname-t"></span><span class="pn" id="pphone"></span></b><span id="pstatus" class="stat"></span><button onclick="closeChat()">סגירה</button></div>
 <div class="msgs" id="pmsgs"></div><div class="sent" id="psent"></div>
 <div class="attach" id="pattach" hidden></div>
-<div class="compose"><button class="clip" title="לצרף תמונה או קובץ" onclick="document.getElementById('pfile').click()">📎</button><input type="file" id="pfile" hidden onchange="pickFile(this.files[0]); this.value=''"><textarea id="ptext" placeholder="לכתוב הודעה… (Enter לשליחה, Shift+Enter לשורה חדשה)"></textarea><button class="primary" onclick="sendMsg()">שליחה</button></div></div>
+<div class="compose"><button class="clip" title="לצרף תמונה או קובץ" onclick="document.getElementById('pfile').click()">📎</button><input type="file" id="pfile" hidden onchange="pickFile(this.files[0]); this.value=''"><button class="clip" id="pmic" title="להקליט הודעה קולית" onclick="toggleRec()">🎤</button><textarea id="ptext" placeholder="לכתוב הודעה… (Enter לשליחה, Shift+Enter לשורה חדשה)"></textarea><button class="primary" onclick="sendMsg()">שליחה</button></div></div>
 <script>
 const ICON={meeting:'📅',call:'📞',follow_up:'✅'};
 const L='he-IL';
+let rec=null; // voice recording in progress: {mr, stream, chunks, start, timer, cancelled}
 let S=null, tab=localStorage.getItem('tab')||'upcoming';
 const key=it=>(it.when_iso||'').slice(0,10);
 function fmtWhen(it){ if(!it.when_iso) return it.when_text||'בלי תאריך עדיין'; const [d,t]=it.when_iso.split('T'); const day=new Date(d+'T12:00:00').toLocaleDateString(L,{weekday:'short',day:'numeric',month:'short'}); return t&&!it.all_day?day+' · '+t:day; }
@@ -389,7 +441,7 @@ function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','
 function setTab(t){tab=t;localStorage.setItem('tab',t);render()}
 let serverStart=null;
 async function load(){ try{ S=await (await fetch('/api/state')).json(); }catch{ return; }
-  if(serverStart===null) serverStart=S.startedAt; else if(S.startedAt&&S.startedAt!==serverStart){ const busy=pending||(document.getElementById('ptext').value.trim())||[...document.querySelectorAll('audio,video')].some(el=>!el.paused&&!el.ended); if(!busy){ location.reload(); return; } }
+  if(serverStart===null) serverStart=S.startedAt; else if(S.startedAt&&S.startedAt!==serverStart){ const busy=pending||rec||(document.getElementById('ptext').value.trim())||[...document.querySelectorAll('audio,video')].some(el=>!el.paused&&!el.ended); if(!busy){ location.reload(); return; } }
   const st=document.getElementById('status'); const map={starting:'מתחיל…',qr:'ממתין לסריקת QR',authenticating:'מתחבר…',ready:'מחובר'+(S.me?': '+S.me:''),disconnected:'מנותק',switching:'מנתק את הטלפון…'};
   document.getElementById('switchbtn').textContent=S.status==='qr'?'ביטול / לנסות שוב':'החלפת טלפון';
   st.textContent=map[S.status]||S.status; st.className='pill '+(S.status==='ready'?'':'off');
@@ -430,7 +482,7 @@ function setView(v){ view=v; localStorage.setItem('view',v); document.body.class
 async function loadChats(){ try{ chats=await (await fetch('/api/chats')).json(); }catch{ return; } if(cur&&cur.name===cur.chatId){ const c=chats.find(x=>x.id===cur.chatId); if(c){ cur.name=c.name; document.getElementById('pname-t').textContent=c.name; } } renderChats(); }
 function renderChats(){ const q=(document.getElementById('csearch').value||'').trim().toLowerCase(); const qd=q.replace(/\\D/g,'').replace(/^0/,''); const list=chats.filter(c=>!q||(c.name||'').toLowerCase().includes(q)||(c.last_body||'').toLowerCase().includes(q)||(qd.length>=4&&(c.phone||'').replace(/\\D/g,'').includes(qd)));
   const asNum=/^[+\\d][\\d\\s()\\-]{7,}$/.test(q)?'<div class="ci nc" onclick="startChatByNumber(document.getElementById(\\'csearch\\').value)"><b>💬 צ\\'אט חדש עם <bdi>'+esc(q)+'</bdi></b><span class="p">לפתוח שיחה עם המספר הזה, גם אם הוא לא ברשימה</span></div>':'';
-  document.getElementById('clist').innerHTML=asNum+list.map(c=>'<div class="ci '+(cur&&cur.chatId===c.id?'on':'')+'" onclick="openChatById(\\''+esc(c.id)+'\\')"><b>'+esc(c.name||c.id)+'</b><span class="t">'+(c.timestamp?fmtChatTime(c.timestamp):'')+'</span>'+'<span class="p">'+(c.last_from_me?'את: ':'')+esc(c.last_body||'')+'</span>'+(c.unread?'<span class="u">'+c.unread+'</span>':'')+'</div>').join('')||(asNum?'':'<div class="stat" style="padding:14px">אין צ\\'אטים להצגה.</div>'); }
+  document.getElementById('clist').innerHTML=asNum+list.map(c=>'<div class="ci '+(cur&&cur.chatId===c.id?'on':'')+'" onclick="openChatById(\\''+esc(c.id)+'\\')"><b>'+(c.isGroup?'👥 ':'')+esc(c.name||c.id)+'</b><span class="t">'+(c.timestamp?fmtChatTime(c.timestamp):'')+'</span>'+'<span class="p">'+(c.last_from_me?'את: ':'')+esc(c.last_body||'')+'</span>'+(c.unread?'<span class="u">'+c.unread+'</span>':'')+'</div>').join('')||(asNum?'':'<div class="stat" style="padding:14px">אין צ\\'אטים להצגה.</div>'); }
 function fmtChatTime(ts){ const d=new Date(ts*1000), now=new Date(); return d.toDateString()===now.toDateString()?d.toLocaleTimeString(L,{hour:'2-digit',minute:'2-digit'}):d.toLocaleDateString(L,{day:'numeric',month:'short'}); }
 function newChatPrompt(){ const v=prompt('לאיזה מספר לשלוח? (למשל 050-1234567 או ‎+1 555 123 4567)'); if(v&&v.trim()) startChatByNumber(v); }
 async function startChatByNumber(num){ let r, j; try{ r=await fetch('/api/chats/by-number',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({number:num})}); j=await r.json().catch(()=>({})); }catch{ alert('אין תשובה מהתוכנה'); return; }
@@ -447,7 +499,7 @@ async function showChat(c){ cur=c; const panel=document.getElementById('panel');
   if(view==='chats'&&panel.parentElement===document.body){ const slot=document.getElementById('cslot'); if(slot) slot.replaceWith(panel); }
   document.getElementById('pname-t').textContent=cur.name; document.getElementById('pphone').textContent=''; document.getElementById('pmsgs').innerHTML='<div class="stat">טוען…</div>';
   panel.classList.add('open'); await loadChat(true); clearInterval(ptimer); ptimer=setInterval(()=>loadChat(false),8000); document.getElementById('ptext').focus(); }
-function closeChat(){ document.getElementById('panel').classList.remove('open'); clearInterval(ptimer); cur=null; }
+function closeChat(){ cancelRec(); document.getElementById('panel').classList.remove('open'); clearInterval(ptimer); cur=null; }
 setView(view);
 async function loadChat(scroll){ if(!cur) return; const id=cur.chatId; let d; try{ d=await (await fetch('/api/chats/'+encodeURIComponent(id)+'/messages')).json(); }catch{ return; } if(!cur||cur.chatId!==id) return;
   if(d.phone&&d.phone!==cur.name) document.getElementById('pphone').textContent=d.phone;
@@ -457,7 +509,7 @@ async function loadChat(scroll){ if(!cur) return; const id=cur.chatId; let d; tr
   const sig=d.messages.map(m=>m.id+':'+(m.media_status||'')).join('|');
   if(!scroll&&sig===box.dataset.sig) return;
   box.dataset.sig=sig;
-  box.innerHTML=d.messages.map(m=>'<div class="b '+(m.from_me?'me':'')+(m.id===cur.msgId?' hl':'')+(m.deleted_at?' del':'')+'">'+mediaHtml(m)+esc(bodyText(m))+(m.deleted_at?'<span class="flag">🚫 '+(m.from_me?'מחקת את ההודעה הזאת':'נמחקה על ידי השולח')+' · '+esc(new Date(m.deleted_at.replace(' ','T')+'Z').toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}))+' · הטקסט נשמר כאן</span>':'')+(m.edited_from?'<span class="flag ed" title="'+esc('לפני העריכה: '+m.edited_from)+'">✏️ נערכה (להצגת המקור: לרחף)</span>':'')+'<span class="t">'+(m.from_me?'':esc(m.sender||'')+' · ')+new Date(m.ts*1000).toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+'</span></div>').join('')||'<div class="stat">עדיין אין הודעות שמורות לצ\\'אט הזה.</div>';
+  box.innerHTML=d.messages.map(m=>'<div class="b '+(m.from_me?'me':'')+(m.id===cur.msgId?' hl':'')+(m.deleted_at?' del':'')+'">'+mediaHtml(m)+(bodyText(m)?'<div class="tx">'+esc(bodyText(m))+'</div>':'')+(m.deleted_at?'<span class="flag">🚫 '+(m.from_me?'מחקת את ההודעה הזאת':'נמחקה על ידי השולח')+' · '+esc(new Date(m.deleted_at.replace(' ','T')+'Z').toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}))+' · הטקסט נשמר כאן</span>':'')+(m.edited_from?'<span class="flag ed" title="'+esc('לפני העריכה: '+m.edited_from)+'">✏️ נערכה (להצגת המקור: לרחף)</span>':'')+'<span class="t">'+(m.from_me?'':esc(m.sender||'')+' · ')+new Date(m.ts*1000).toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+'</span></div>').join('')||'<div class="stat">עדיין אין הודעות שמורות לצ\\'אט הזה.</div>';
   if(scroll||atBottom) box.scrollTop=box.scrollHeight; }
 function fmtSize(n){ if(!n) return ''; return n>1048576?(n/1048576).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB'; }
 function bodyText(m){ if(m.media_type&&m.media_type!=='sticker'&&m.body&&m.body.startsWith('[')){ const i=m.body.indexOf(']'); return i>0?m.body.slice(i+1).trim():''; } return m.body||''; }
@@ -492,13 +544,35 @@ function pickFile(file){ if(!file||!cur) return; if(file.size>45*1024*1024){ ale
     mine.loading=false; if(pending===mine) renderAttach(); }; r.readAsDataURL(file); }
 function fileIcon(mime,name){ const e=(name||'').split('.').pop().toLowerCase(); if(mime.startsWith('image/')) return '🖼️'; if(mime.startsWith('video/')) return '🎬'; if(mime.startsWith('audio/')) return '🎵'; if(e==='pdf') return '📕'; if(['doc','docx'].includes(e)) return '📘'; if(['xls','xlsx','csv'].includes(e)) return '📗'; if(['ppt','pptx'].includes(e)) return '📙'; if(e==='zip') return '🗜️'; return '📄'; }
 function renderAttach(){ const a=document.getElementById('pattach'); if(!pending){ a.hidden=true; a.innerHTML=''; return; }
+  if(pending.voice){ a.hidden=false; a.innerHTML='<span class="big">🎤</span><span class="nm"><b>הודעה קולית</b><audio controls src="'+pending.audioUrl+'"></audio></span><span class="x" onclick="clearAttach()" title="למחוק את ההקלטה">✕</span>'; return; }
   a.hidden=false; a.innerHTML=(pending.previewUrl?'<img src="'+pending.previewUrl+'">':'<span class="big">'+(pending.loading?'⏳':fileIcon(pending.mimetype,pending.name))+'</span>')+'<span class="nm"><b>'+esc(pending.name)+'</b><span class="muted">'+fmtSize(pending.size)+(pending.loading?' · מכין תצוגה…':'')+'</span></span><span class="x" onclick="clearAttach()" title="להסיר">✕</span>'; }
 function clearAttach(){ pending=null; renderAttach(); }
 document.getElementById('panel').addEventListener('dragover',e=>{ if(!cur) return; e.preventDefault(); document.getElementById('panel').classList.add('drop'); });
 document.getElementById('panel').addEventListener('dragleave',()=>document.getElementById('panel').classList.remove('drop'));
 document.getElementById('panel').addEventListener('drop',e=>{ e.preventDefault(); document.getElementById('panel').classList.remove('drop'); const f=e.dataTransfer&&e.dataTransfer.files[0]; if(f) pickFile(f); });
 document.getElementById('ptext').addEventListener('paste',e=>{ const it=[...(e.clipboardData&&e.clipboardData.items||[])].find(i=>i.kind==='file'); if(it){ e.preventDefault(); pickFile(it.getAsFile()); } });
+// Voice note recorder: 🎤 starts, 🎤 again (or ■) stops; the recording waits above the box to be heard and sent like an attachment.
+async function toggleRec(){ if(rec){ stopRec(); return; } if(!cur) return;
+  if(!navigator.mediaDevices||!window.MediaRecorder){ alert('ההקלטה לא נתמכת בחלון הזה. אפשר לפתוח בדפדפן (תפריט ← לפתוח בדפדפן).'); return; }
+  let stream; try{ stream=await navigator.mediaDevices.getUserMedia({audio:true}); }catch(e){ alert('אין גישה למיקרופון. צריך לאשר גישה למיקרופון בהגדרות המערכת ← פרטיות ואבטחה ← מיקרופון.'); return; }
+  clearAttach(); const mr=new MediaRecorder(stream); rec={mr,stream,chunks:[],start:Date.now(),cancelled:false};
+  mr.ondataavailable=e=>{ if(e.data&&e.data.size) rec.chunks.push(e.data); };
+  mr.onstop=()=>{ const r=rec; rec=null; clearInterval(r.timer); r.stream.getTracks().forEach(t=>t.stop()); document.getElementById('pmic').classList.remove('rec'); document.getElementById('pmic').textContent='🎤';
+    if(r.cancelled||!r.chunks.length){ renderAttach(); return; }
+    const blob=new Blob(r.chunks,{type:mr.mimeType||'audio/mp4'}); const fr=new FileReader();
+    fr.onload=()=>{ pending={voice:true,name:'הודעה קולית',mimetype:blob.type,data:String(fr.result).split(',')[1],size:blob.size,audioUrl:URL.createObjectURL(blob)}; renderAttach(); }; fr.readAsDataURL(blob); };
+  mr.start(250); const b=document.getElementById('pmic'); b.classList.add('rec'); b.textContent='■'; b.title='לעצור את ההקלטה';
+  const tick=()=>{ if(!rec) return; const s=Math.floor((Date.now()-rec.start)/1000); const a=document.getElementById('pattach'); a.hidden=false; a.innerHTML='<span class="recdot"></span><span class="nm"><b>מקליט… '+Math.floor(s/60)+':'+String(s%60).padStart(2,'0')+'</b><span class="muted">לחיצה על ■ לסיום</span></span><span class="x" onclick="cancelRec()" title="לבטל">✕</span>'; if(s>=600) stopRec(); };
+  tick(); rec.timer=setInterval(tick,500); }
+function stopRec(){ if(rec&&rec.mr.state!=='inactive') rec.mr.stop(); }
+function cancelRec(){ if(!rec) return; rec.cancelled=true; stopRec(); }
 async function sendMsg(){ if(!cur) return; const ta=document.getElementById('ptext'); const text=ta.value.trim();
+  if(rec) return;
+  if(pending&&pending.voice){ ta.disabled=true; document.getElementById('psent').textContent='שולח הודעה קולית…';
+    const r=await fetch('/api/chats/'+encodeURIComponent(cur.chatId)+'/send-voice',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mimetype:pending.mimetype,data:pending.data})}); const j=await r.json().catch(()=>({})); ta.disabled=false;
+    if(!r.ok){ document.getElementById('psent').textContent=''; alert('השליחה נכשלה: '+(j.error||r.status)); return; }
+    clearAttach(); document.getElementById('psent').textContent='נשלח ✓'; setTimeout(()=>document.getElementById('psent').textContent='',2500);
+    if(!text){ setTimeout(()=>{loadChat(true);load();},2000); return; } }
   if(pending){ ta.disabled=true; document.getElementById('psent').textContent='שולח קובץ…';
     const r=await fetch('/api/chats/'+encodeURIComponent(cur.chatId)+'/send-file',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:pending.name,mimetype:pending.mimetype,data:pending.data,caption:text})}); const j=await r.json().catch(()=>({})); ta.disabled=false;
     if(!r.ok){ document.getElementById('psent').textContent=''; alert('השליחה נכשלה: '+(j.error||r.status)); return; }

@@ -3,7 +3,7 @@
 set -e
 cd "$(dirname "$0")"
 APP="$HOME/Desktop/מעקב פגישות.app"
-swiftc -O -o "מעקב פגישות" main.swift -framework Cocoa -framework WebKit
+swiftc -O -target "$(uname -m)-apple-macos12.0" -o "מעקב פגישות" main.swift -framework Cocoa -framework WebKit
 pkill -x "מעקב פגישות" 2>/dev/null || true
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 mv "מעקב פגישות" "$APP/Contents/MacOS/"

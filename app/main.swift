@@ -110,6 +110,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
         }
     }
 
+    // Microphone for the voice-note recorder: allow it for the local dashboard only (macOS still asks once).
+    @available(macOS 12.0, *)
+    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        decisionHandler(origin.host == "localhost" && type == .microphone ? .grant : .deny)
+    }
+
     // JavaScript dialogs (the dashboard uses confirm/prompt/alert).
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
         let a = NSAlert(); a.messageText = message; a.addButton(withTitle: "אישור"); a.runModal(); completionHandler()

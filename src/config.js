@@ -42,8 +42,9 @@ export const config = {
   authDir: path.join(DATA_DIR, "whatsapp-session"),
 };
 
-export function chatAllowed(chat) {
-  if (config.ignoreGroups && chat.isGroup) return false;
+/** includeGroups: the dashboard chat list shows groups even when IGNORE_GROUPS keeps them out of appointment scanning. */
+export function chatAllowed(chat, { includeGroups = false } = {}) {
+  if (config.ignoreGroups && chat.isGroup && !includeGroups) return false;
   const name = (chat.name || "").toLowerCase();
   const id = chat.id?.user || "";
   const matches = (needle) => {

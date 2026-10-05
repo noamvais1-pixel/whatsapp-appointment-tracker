@@ -389,7 +389,7 @@ export async function listChats() {
     try {
       const chats = await current.getChats();
       const list = chats
-        .filter((c) => c.id._serialized !== "status@broadcast" && chatAllowed(c))
+        .filter((c) => c.id._serialized !== "status@broadcast" && chatAllowed(c, { includeGroups: true }))
         .map((c) => ({
           id: c.id._serialized,
           name: c.name || c.id.user,

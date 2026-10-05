@@ -139,7 +139,7 @@ Endpoints: `GET /api/refs` (JSON) and `GET /api/refs/export` (plain text).
 |---|---|
 | `TIMEZONE` | So "tomorrow at 3" lands on the right day. Blank = this Mac's timezone. |
 | `BACKFILL_DAYS` | How far back to read on first link. |
-| `IGNORE_GROUPS` | `true` skips group chats (recommended). |
+| `IGNORE_GROUPS` | `true` keeps group chats out of appointment scanning (recommended). Groups still appear in the dashboard chat list. |
 | `ONLY_CHATS` / `SKIP_CHATS` | Comma-separated contact names or numbers to include / exclude. |
 | `CALENDAR_NAME` | Mac calendar that receives meetings and calls. `CALENDAR_SYNC=false` turns it off. |
 | `CALENDAR_MEETING_MINUTES` / `CALENDAR_CALL_MINUTES` / `CALENDAR_ALARM_MINUTES` | Event lengths and the alert, in minutes. |
