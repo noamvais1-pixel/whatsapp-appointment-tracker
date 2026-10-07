@@ -395,6 +395,48 @@ export async function resolveAllPhones() {
   }
 }
 
+// WhatsApp now files private chats under an internal id (…@lid) whose title is just the number;
+// the name saved in the phone's address book sits on the separate phone-number contact (…@c.us).
+// Build a phone -> name map from the full contact list (refreshed every 10 minutes).
+let contactNames = { at: 0, byPhone: new Map(), byId: new Map() };
+let loadingNames = false;
+async function loadContactNames() {
+  if (loadingNames || Date.now() - contactNames.at < 600_000) return;
+  loadingNames = true;
+  try {
+    // read WhatsApp Web's contact store directly: client.getContacts() builds a full model per contact and takes minutes
+    const all = await withTimeout(current.pupPage.evaluate(() => {
+      const G = window.require("WAWebContactGetters");
+      const { getIsMyContact } = window.require("WAWebFrontendContactGetters");
+      return window.require("WAWebCollections").Contact.getModelsArray().map((c) => ({
+        id: c.id?._serialized, server: c.id?.server, user: c.id?.user,
+        saved: getIsMyContact(c) ? G.getName(c) || "" : "", pushname: G.getPushname(c) || "", verified: G.getVerifiedName(c) || "",
+      }));
+    }), 60000);
+    const byPhone = new Map(), byId = new Map();
+    for (const c of all) {
+      const label = c.saved || (c.pushname ? `~ ${c.pushname}` : "") || c.verified;
+      if (!label || !c.id) continue;
+      byId.set(c.id, label);
+      if (c.server === "c.us" && (c.saved || !byPhone.has(c.user))) byPhone.set(c.user, label);
+    }
+    contactNames = { at: Date.now(), byPhone, byId };
+    chatListCache.at = 0; // let the next list pick the names up
+    console.log(`[contacts] ${byPhone.size} names from the address book`);
+  } catch (e) {
+    contactNames.at = Date.now() - 300_000; // retry in 5 minutes
+    console.warn("[contacts] could not load names:", String(e.message).slice(0, 100));
+  } finally {
+    loadingNames = false;
+  }
+}
+const looksLikeNumber = (s) => !s || !/[\p{L}]/u.test(s);
+function contactName(chatId, title) {
+  if (!looksLikeNumber(title)) return title;
+  const phone = store.getPhone(chatId)?.phone;
+  return (phone && contactNames.byPhone.get(phone)) || contactNames.byId.get(chatId) || title;
+}
+
 let chatListCache = { at: 0, list: [] };
 /** Chat list for the dashboard (live from WhatsApp when linked, else from stored messages). */
 export async function listChats() {
@@ -402,11 +444,12 @@ export async function listChats() {
     if (Date.now() - chatListCache.at < 15000) return chatListCache.list;
     try {
       const chats = await current.getChats();
+      loadContactNames(); // in the background
       const list = chats
         .filter((c) => c.id._serialized !== "status@broadcast" && chatAllowed(c, { includeGroups: true }))
         .map((c) => ({
           id: c.id._serialized,
-          name: c.name || c.id.user,
+          name: c.isGroup ? (c.name || c.id.user) : contactName(c.id._serialized, c.name || c.id.user),
           phone: c.isGroup ? "" : phoneFor(c.id._serialized),
           isGroup: !!c.isGroup,
           timestamp: c.timestamp || 0,
@@ -424,7 +467,7 @@ export async function listChats() {
       reportRead(false, e);
     }
   }
-  return store.chatSummaries().map((c) => ({ ...c, phone: phoneFor(c.id), isGroup: false, unread: 0, last_from_me: !!c.last_from_me }));
+  return store.chatSummaries().map((c) => ({ ...c, name: contactName(c.id, c.name), phone: phoneFor(c.id), isGroup: false, unread: 0, last_from_me: !!c.last_from_me }));
 }
 
 async function fetchWithRetry(chat, opts) {
