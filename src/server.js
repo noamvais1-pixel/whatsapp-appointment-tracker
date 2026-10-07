@@ -1,5 +1,6 @@
 import express from "express";
-import { config } from "./config.js";
+import { config, ROOT } from "./config.js";
+import { installAuth, authEnabled } from "./auth.js";
 import * as store from "./db.js";
 import { state, relink, runBackfill, listChats, phoneFor, resolvePhones } from "./whatsapp.js";
 import { buildDigest, localDateKey } from "./digest.js";
@@ -31,8 +32,36 @@ async function nameGroupSenders(client, messages) {
   for (const m of messages) if (senderNames.get(m.sender)) m.sender = senderNames.get(m.sender);
 }
 
+/** Addresses of this Mac on the local network, so we can print a URL the phone can actually use. */
+function lanAddresses() {
+  const out = [];
+  for (const [name, addrs] of Object.entries(os.networkInterfaces())) {
+    for (const a of addrs || []) {
+      if (a.family !== "IPv4" || a.internal) continue;
+      // Skip link-local (169.254.x) and the bridges macOS creates for VMs/containers.
+      if (a.address.startsWith("169.254.")) continue;
+      out.push({ name, address: a.address });
+    }
+  }
+  // en0/en1 are the built-in Wi-Fi and Ethernet; prefer them over bridge/utun interfaces.
+  out.sort((x, y) => (x.name.startsWith("en") ? 0 : 1) - (y.name.startsWith("en") ? 0 : 1));
+  return out;
+}
+
 export function startServer(getClient) {
   const app = express();
+  app.disable("x-powered-by");
+
+  // The password gate goes before the body parser and before every data route, so an
+  // unauthenticated request never reaches message content and never gets 60mb buffered.
+  installAuth(app, express);
+
+  // Home-screen install support. No message data here, so these stay readable before sign-in.
+  app.get("/manifest.webmanifest", (req, res) => res.type("application/manifest+json").send(MANIFEST));
+  for (const [route, file] of [["/icon-180.png", "icon-180.png"], ["/icon-192.png", "icon-192.png"], ["/icon-512.png", "icon-512.png"]]) {
+    app.get(route, (req, res) => res.sendFile(path.join(ROOT, "assets", file), (err) => { if (err) res.status(404).end(); }));
+  }
+
   app.use(express.json({ limit: "60mb" })); // attachments arrive base64-encoded in JSON
 
   app.get("/api/state", (req, res) => {
@@ -243,12 +272,57 @@ export function startServer(getClient) {
   });
 
   app.get("/", (req, res) => res.type("html").send(PAGE));
-  app.listen(config.port, () => console.log(`[dashboard] http://localhost:${config.port}`));
+
+  app.listen(config.port, config.bindHost, () => {
+    console.log(`[dashboard] on this Mac:  http://localhost:${config.port}`);
+    if (config.bindHost === "127.0.0.1" || config.bindHost === "localhost") {
+      console.log("[dashboard] BIND_HOST limits this to the Mac only - other devices cannot reach it");
+      return;
+    }
+    const lan = lanAddresses();
+    if (!lan.length) {
+      console.log("[dashboard] no local network address found - is this Mac on Wi-Fi?");
+    } else {
+      for (const { name, address } of lan) console.log(`[dashboard] from your phone: http://${address}:${config.port}   (${name})`);
+    }
+    if (!authEnabled()) {
+      console.log("[dashboard] WARNING: no DASHBOARD_PASSWORD set. Anyone on this Wi-Fi network can read your messages,");
+      console.log("[dashboard]          including bank details and ID numbers. Set DASHBOARD_PASSWORD in .env.");
+    }
+  });
   return app;
 }
 
+const MANIFEST = JSON.stringify({
+  name: "פגישות ומעקבים",
+  short_name: "פגישות",
+  lang: "he",
+  dir: "rtl",
+  start_url: "/",
+  scope: "/",
+  display: "standalone",
+  orientation: "portrait",
+  background_color: "#eaedf3",
+  theme_color: "#1b7a4a",
+  icons: [
+    { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+    { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+    { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+  ],
+});
+
 const PAGE = /* html */ `<!doctype html>
-<html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="he" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="icon" type="image/png" href="/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="פגישות">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#eaedf3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#171a22" media="(prefers-color-scheme: dark)">
 <title>פגישות ומעקבים</title>
 <style>
   :root{--ink:#17181c;--muted:#5f6470;--line:rgba(255,255,255,.65);--accent:#1b7a4a;--accent2:#2fb673;--warn:#b4471d;
@@ -271,6 +345,7 @@ const PAGE = /* html */ `<!doctype html>
   .pill{font-size:12.5px;padding:4px 11px;border-radius:99px;background:rgba(27,122,74,.14);color:var(--accent);font-weight:600;border:1px solid rgba(27,122,74,.18)}
   .pill.off{background:rgba(180,71,29,.12);color:var(--warn);border-color:rgba(180,71,29,.2)}.pill.warn{background:rgba(209,154,0,.14);color:#6b4d00;border-color:rgba(209,154,0,.25)}
   .grow{flex:1}.muted{color:var(--muted)}
+  #hdracts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
   button{font:inherit;border:1px solid var(--line);background:var(--glass-strong);color:var(--ink);border-radius:99px;padding:7px 14px;cursor:pointer;
     -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);box-shadow:0 2px 8px rgba(25,35,70,.08),0 1px 0 rgba(255,255,255,.9) inset;transition:transform .12s,background .15s}
   button:hover{background:rgba(255,255,255,.92)}button:active{transform:scale(.97)}
@@ -375,12 +450,97 @@ const PAGE = /* html */ `<!doctype html>
     .strip.ok{background:rgba(40,170,110,.25)}.strip.warn{background:rgba(200,150,30,.25)}.strip.bad{background:rgba(200,80,50,.3)}
     .alert{background:rgba(200,80,50,.3);color:#ffd9cc}.alert.soft{background:rgba(200,150,30,.28);color:#ffe9b0}.qr img{background:#fff}
   }
+
+  /* ---- phone layout. The dashboard was built for a desktop window; below ~640px the
+         header button row, the side-by-side chat view and the three-column cards all
+         overflow a 390px screen. These rules re-flow them without changing the design. ---- */
+  @media (max-width:640px){
+    /* iOS reports the notch/home-bar insets; keep content clear of them in standalone mode */
+    header{margin:8px 8px 0;padding:9px 11px;gap:8px;row-gap:7px;
+      padding-top:max(9px,env(safe-area-inset-top))}
+    h1{font-size:16.5px}
+    header .grow{display:none}
+    /* five buttons wrap into a five-row wall on a phone and the sticky header eats the
+       screen; one horizontally-scrolling row keeps them all reachable in ~44px */
+    #hdracts{width:100%;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;
+      scrollbar-width:none;padding-bottom:2px}
+    #hdracts::-webkit-scrollbar{display:none}
+    #hdracts button{flex:none;white-space:nowrap;min-height:40px;padding:8px 14px}
+
+    .strip{margin:8px 8px 0;padding:10px 12px;font-size:13.5px}
+    .strip .stat{display:none}
+    .strip .d{margin-inline-start:0}
+    .strip.open{flex-wrap:wrap}.strip.open .d{display:block;width:100%}
+
+    main,main.wide{padding:12px 10px calc(48px + env(safe-area-inset-bottom));max-width:100%}
+
+    .views{width:100%;justify-content:stretch}
+    .views button{flex:1;padding:9px 4px;font-size:13.5px;min-height:40px;text-align:center}
+    nav button{min-height:38px;padding:7px 13px}
+
+    /* 16px is the threshold below which iOS Safari zooms the page in on focus */
+    .add input,.add select,.clist input,.rtools input,.compose textarea{font-size:16px;min-height:44px}
+    .add{gap:8px}
+    .add select{flex:none;min-width:110px}
+    .add input.t{flex:1 1 100%;min-width:0}
+    .add input#nwhen{flex:1}
+    .add button{min-height:44px;flex:none}
+    .rtools{gap:8px}.rtools input{flex:1 1 100%;min-width:0}.rtools button{min-height:44px}
+
+    /* the auto-width third column squeezed the title to a few characters; give the
+       buttons their own full-width row instead */
+    .card,.rcard{grid-template-columns:28px minmax(0,1fr);padding:12px 13px}
+    .card .actions,.rcard .ract{grid-column:1/-1;justify-content:flex-start;margin-top:9px}
+    .card .when{display:block}
+    .actions button,.ract button{padding:8px 14px;font-size:14px;min-height:40px}
+    .rmore{min-height:34px}
+    .rval{font-size:16px}
+    .rtag{margin-inline-start:6px}
+
+    .qr{padding:14px;margin:10px 0 18px}
+    .qr img{width:min(260px,100%);height:auto}
+
+    /* 340px of chat list plus a conversation pane cannot share a 390px screen; stack them */
+    #chatsview.on{flex-direction:column;height:auto;min-height:0;gap:10px}
+    .clist{width:auto;max-height:42vh}
+    .clist input{margin:8px}
+    .ci{padding:12px 14px}
+    .cempty{min-height:130px;padding:24px;text-align:center}
+    body.chats #panel{min-height:58vh}
+
+    /* full-screen conversation overlay outside the stacked chats view */
+    body:not(.chats) #panel{top:0;left:0;right:0;bottom:0;width:auto;border-radius:0;border:0;
+      padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+    .ph{padding:12px 14px}.ph b{font-size:15px}
+    .ph button{min-height:40px}
+    .msgs{padding:12px 10px}
+    .b{max-width:88%}
+    .compose textarea{height:46px}
+    .compose .clip{min-height:46px;padding:0 14px}
+    .compose button{min-height:46px}
+
+    /* media was pinned to desktop pixel widths and overflowed the bubble */
+    .mimg,.mvid,.mdoc{max-width:100%}
+    .maud{width:100%;max-width:100%}
+    .mph,.mph.small{width:100%;max-width:100%}
+    .attach img{max-width:46%}
+    .attach audio{max-width:100%;flex:1;min-width:0}
+  }
+
+  /* iOS Safari's 100vh includes the toolbars, so a 100vh pane is taller than the screen */
+  @supports (height:100dvh){
+    @media (max-width:640px){
+      body:not(.chats) #panel{height:100dvh}
+      .clist{max-height:42dvh}
+      body.chats #panel{min-height:58dvh}
+    }
+  }
 </style></head><body>
 <header><h1>פגישות ומעקבים</h1><span id="status" class="pill">…</span><span id="bf" class="stat"></span><span class="grow"></span>
-<button id="checkbtn" onclick="checkNow()">לבדוק הודעות חדשות עכשיו</button><button onclick="openDigest()">סדר היום</button><button onclick="checkUpdates()" title="לבדוק אם יש גרסה חדשה ב-GitHub ולהתקין אותה">בדיקת עדכונים</button><button id="switchbtn" onclick="switchPhone()">החלפת טלפון</button><button onclick="quitApp()" title="לעצור את התוכנה">יציאה</button></header>
+<div id="hdracts"><button id="checkbtn" onclick="checkNow()">לבדוק הודעות חדשות עכשיו</button><button onclick="openDigest()">סדר היום</button><button onclick="checkUpdates()" title="לבדוק אם יש גרסה חדשה ב-GitHub ולהתקין אותה">בדיקת עדכונים</button><button id="switchbtn" onclick="switchPhone()">החלפת טלפון</button><button onclick="quitApp()" title="לעצור את התוכנה">יציאה</button></div></header>
 <div id="strip" class="strip" onclick="this.classList.toggle('open')"><span class="dot"></span><b id="stext">בודק…</b><span class="d" id="sdetails"></span><span class="grow"></span><span class="stat">לחיצה לפרטים</span></div>
 <main id="main">
-<div class="views"><button id="v-tasks" class="on" onclick="setView('tasks')">משימות</button><button id="v-refs" onclick="setView('refs')">מספרים וקישורים</button><button id="v-chats" onclick="setView('chats')">צ'אטים</button></div>
+<div class="views"><button id="v-tasks" class="on" onclick="setView('tasks')">משימות</button><button id="v-refs" onclick="setView('refs')">מספרים וקישורים</button><button id="v-chats" onclick="setView('chats')">צ'אטים</button><button id="v-groups" onclick="setView('groups')">קבוצות</button></div>
 <div id="alerts"></div>
 <div id="qr" class="qr" style="display:none"><div style="margin-bottom:10px">בטלפון שרוצים לעקוב אחריו: <b>וואטסאפ ← הגדרות ← מכשירים מקושרים ← קישור מכשיר</b>, ואז לסרוק:</div><img id="qrimg" alt="קוד QR"></div>
 <form class="add" onsubmit="return addItem(event)"><select id="ntype"><option value="follow_up">מעקב</option><option value="meeting">פגישה</option><option value="call">שיחה</option></select>
@@ -471,18 +631,22 @@ async function checkUpdates(){ const b=event&&event.target; if(b) b.disabled=tru
 async function quitApp(){ if(!confirm('לעצור את התוכנה? היא תפסיק לקרוא הודעות עד שתפתחו אותה שוב.')) return; await fetch('/api/quit',{method:'POST'}); document.getElementById('status').textContent='נעצר'; document.getElementById('status').className='pill off'; }
 async function openDigest(){ const t=await (await fetch('/api/digest')).text(); alert(t.replace(/\\*/g,'')); }
 let cur=null, ptimer=null, view=localStorage.getItem('view')||'tasks', chats=[], ctimer=null;
-function setView(v){ view=v; localStorage.setItem('view',v); document.body.classList.toggle('chats',v==='chats');
-  for(const k of ['tasks','refs','chats']) document.getElementById('v-'+k).classList.toggle('on',v===k);
+// "groups" is the same chat screen as "chats", listing only WhatsApp groups.
+const isChatView=v=>v==='chats'||v==='groups';
+function setView(v){ const prev=view; view=v; localStorage.setItem('view',v); const cv=isChatView(v); document.body.classList.toggle('chats',cv);
+  if(cv&&isChatView(prev)&&prev!==v&&cur){ closeChat(); }
+  document.getElementById('csearch').placeholder=v==='groups'?'חיפוש קבוצה…':'חיפוש צ\\'אט או מספר טלפון…'; document.querySelector('#chatsview .newchat').style.display=v==='groups'?'none':'';
+  for(const k of ['tasks','refs','chats','groups']) document.getElementById('v-'+k).classList.toggle('on',v===k);
   document.getElementById('tasksview').style.display=v==='tasks'?'':'none'; document.querySelector('.add').style.display=v==='tasks'?'':'none';
   document.getElementById('refsview').classList.toggle('on',v==='refs'); if(v==='refs') loadRefs();
-  document.getElementById('chatsview').classList.toggle('on',v==='chats'); document.getElementById('main').classList.toggle('wide',v==='chats');
+  document.getElementById('chatsview').classList.toggle('on',cv); document.getElementById('main').classList.toggle('wide',cv);
   const panel=document.getElementById('panel');
-  if(v==='chats'){ if(cur){ const slot=document.getElementById('cslot'); if(slot) slot.replaceWith(panel); panel.classList.add('open'); } else panel.classList.remove('open'); loadChats(); clearInterval(ctimer); ctimer=setInterval(loadChats,20000); }
+  if(cv){ renderChats(); if(cur){ const slot=document.getElementById('cslot'); if(slot) slot.replaceWith(panel); panel.classList.add('open'); } else panel.classList.remove('open'); loadChats(); clearInterval(ctimer); ctimer=setInterval(loadChats,5000); }
   else { clearInterval(ctimer); if(panel.parentElement!==document.body){ const slot=document.createElement('div'); slot.id='cslot'; slot.className='cempty'; slot.textContent='בוחרים צ\\'אט מהרשימה'; panel.replaceWith(slot); document.body.appendChild(panel); } closeChat(); } }
 async function loadChats(){ try{ chats=await (await fetch('/api/chats')).json(); }catch{ return; } if(cur&&cur.name===cur.chatId){ const c=chats.find(x=>x.id===cur.chatId); if(c){ cur.name=c.name; document.getElementById('pname-t').textContent=c.name; } } renderChats(); }
-function renderChats(){ const q=(document.getElementById('csearch').value||'').trim().toLowerCase(); const qd=q.replace(/\\D/g,'').replace(/^0/,''); const list=chats.filter(c=>!q||(c.name||'').toLowerCase().includes(q)||(c.last_body||'').toLowerCase().includes(q)||(qd.length>=4&&(c.phone||'').replace(/\\D/g,'').includes(qd)));
-  const asNum=/^[+\\d][\\d\\s()\\-]{7,}$/.test(q)?'<div class="ci nc" onclick="startChatByNumber(document.getElementById(\\'csearch\\').value)"><b>💬 צ\\'אט חדש עם <bdi>'+esc(q)+'</bdi></b><span class="p">לפתוח שיחה עם המספר הזה, גם אם הוא לא ברשימה</span></div>':'';
-  document.getElementById('clist').innerHTML=asNum+list.map(c=>'<div class="ci '+(cur&&cur.chatId===c.id?'on':'')+'" onclick="openChatById(\\''+esc(c.id)+'\\')"><b>'+(c.isGroup?'👥 ':'')+esc(c.name||c.id)+'</b><span class="t">'+(c.timestamp?fmtChatTime(c.timestamp):'')+'</span>'+'<span class="p">'+(c.last_from_me?'את: ':'')+esc(c.last_body||'')+'</span>'+(c.unread?'<span class="u">'+c.unread+'</span>':'')+'</div>').join('')||(asNum?'':'<div class="stat" style="padding:14px">אין צ\\'אטים להצגה.</div>'); }
+function renderChats(){ const q=(document.getElementById('csearch').value||'').trim().toLowerCase(); const qd=q.replace(/\\D/g,'').replace(/^0/,''); const list=chats.filter(c=>!!c.isGroup===(view==='groups')).filter(c=>!q||(c.name||'').toLowerCase().includes(q)||(c.last_body||'').toLowerCase().includes(q)||(qd.length>=4&&(c.phone||'').replace(/\\D/g,'').includes(qd)));
+  const asNum=view!=='groups'&&/^[+\\d][\\d\\s()\\-]{7,}$/.test(q)?'<div class="ci nc" onclick="startChatByNumber(document.getElementById(\\'csearch\\').value)"><b>💬 צ\\'אט חדש עם <bdi>'+esc(q)+'</bdi></b><span class="p">לפתוח שיחה עם המספר הזה, גם אם הוא לא ברשימה</span></div>':'';
+  document.getElementById('clist').innerHTML=asNum+list.map(c=>'<div class="ci '+(cur&&cur.chatId===c.id?'on':'')+'" onclick="openChatById(\\''+esc(c.id)+'\\')"><b>'+esc(c.name||c.id)+'</b><span class="t">'+(c.timestamp?fmtChatTime(c.timestamp):'')+'</span>'+'<span class="p">'+(c.last_from_me?'את: ':'')+esc(c.last_body||'')+'</span>'+(c.unread?'<span class="u">'+c.unread+'</span>':'')+'</div>').join('')||(asNum?'':'<div class="stat" style="padding:14px">'+(view==='groups'?'אין קבוצות להצגה.':'אין צ\\'אטים להצגה.')+'</div>'); }
 function fmtChatTime(ts){ const d=new Date(ts*1000), now=new Date(); return d.toDateString()===now.toDateString()?d.toLocaleTimeString(L,{hour:'2-digit',minute:'2-digit'}):d.toLocaleDateString(L,{day:'numeric',month:'short'}); }
 function newChatPrompt(){ const v=prompt('לאיזה מספר לשלוח? (למשל 050-1234567 או ‎+1 555 123 4567)'); if(v&&v.trim()) startChatByNumber(v); }
 async function startChatByNumber(num){ let r, j; try{ r=await fetch('/api/chats/by-number',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({number:num})}); j=await r.json().catch(()=>({})); }catch{ alert('אין תשובה מהתוכנה'); return; }
@@ -496,7 +660,7 @@ async function openChatById(chatId){ const c=chats.find(x=>x.id===chatId); await
 async function openChat(itemId){ const it=S.items.find(i=>i.id===itemId); if(!it||!it.chat_id){ alert('הפריט הזה לא מקושר לצ\\'אט.'); return; }
   await showChat({chatId:it.chat_id,name:it.chat_name||it.who||it.chat_id,msgId:it.source_msg_id}); }
 async function showChat(c){ cur=c; const panel=document.getElementById('panel');
-  if(view==='chats'&&panel.parentElement===document.body){ const slot=document.getElementById('cslot'); if(slot) slot.replaceWith(panel); }
+  if(isChatView(view)&&panel.parentElement===document.body){ const slot=document.getElementById('cslot'); if(slot) slot.replaceWith(panel); }
   document.getElementById('pname-t').textContent=cur.name; document.getElementById('pphone').textContent=''; document.getElementById('pmsgs').innerHTML='<div class="stat">טוען…</div>';
   panel.classList.add('open'); await loadChat(true); clearInterval(ptimer); ptimer=setInterval(()=>loadChat(false),8000); document.getElementById('ptext').focus(); }
 function closeChat(){ cancelRec(); document.getElementById('panel').classList.remove('open'); clearInterval(ptimer); cur=null; }
@@ -526,8 +690,8 @@ function mediaHtml(m){ if(!m.media_type||m.media_type==='sticker') return ''; co
   let btn;
   if(m.media_status==='downloading') btn='<span class="dl">⏳ מוריד…</span>';
   else if(m.media_status==='too_large') btn='<span class="dl">קובץ גדול מדי ('+fmtSize(m.media_size)+')</span>';
-  else btn='<button class="dl" onclick="downloadMedia(\\''+id+'\\')">⬇️ '+(m.media_status==='failed'?'לנסות שוב':'הורדה')+'</button>';
-  const note=m.media_status==='failed'?'<span class="lbl">'+esc(m.media_error||'לא הצלחתי להוריד')+'</span>':(small?'':'<span class="lbl">'+ICONS[m.media_type]+' '+esc(name)+'</span>');
+  else btn='<button class="dl" onclick="downloadMedia(\\''+id+'\\')">⬇️ '+(m.media_status==='failed'?'לנסות שוב':m.media_status==='expired'?'להוריד שוב':'הורדה')+'</button>';
+  const note=m.media_status==='failed'||m.media_status==='expired'?'<span class="lbl">'+esc(m.media_error||'לא הצלחתי להוריד')+'</span>':(small?'':'<span class="lbl">'+ICONS[m.media_type]+' '+esc(name)+'</span>');
   return '<div class="mph'+(small?' small':'')+'">'+bg+(small?'<span style="position:relative;z-index:1;margin-inline-end:8px">'+ICONS[m.media_type]+' '+esc(name)+'</span>':'')+btn+note+'</div>'; }
 async function downloadMedia(id){ await fetch('/api/media/'+encodeURIComponent(id)+'/download',{method:'POST'}); setTimeout(()=>loadChat(false),1500); setTimeout(()=>loadChat(false),6000); }
 async function openMedia(id){ const r=await fetch('/api/media/'+encodeURIComponent(id)+'/open',{method:'POST'}); if(!r.ok) alert('הקובץ לא זמין'); }
@@ -631,7 +795,7 @@ function refCard(e,q){ const o=e.occurrences[0]; const open=rOpen[e.key];
 function toggleRef(k){ rOpen[k]=!rOpen[k]; renderRefs(); }
 async function copyRef(btn,enc){ const t=decodeURIComponent(enc); try{ await navigator.clipboard.writeText(t); const o=btn.textContent; btn.textContent='הועתק ✓'; setTimeout(()=>btn.textContent=o,1500); }catch{ prompt('להעתיק:',t); } }
 async function copyAllRefs(){ try{ const t=await (await fetch('/api/refs/export')).text(); await navigator.clipboard.writeText(t); alert('הרשימה הועתקה.'); }catch{ alert('ההעתקה לא עבדה.'); } }
-async function openRefChat(chatId,msgId,encName){ setView('chats'); await showChat({chatId,name:decodeURIComponent(encName),msgId}); }
+async function openRefChat(chatId,msgId,encName){ setView(chatId.endsWith('@g.us')?'groups':'chats'); await showChat({chatId,name:decodeURIComponent(encName),msgId}); }
 
 load(); setInterval(load,10000);
 </script></body></html>`;

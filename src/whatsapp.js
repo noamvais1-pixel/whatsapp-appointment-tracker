@@ -93,7 +93,12 @@ function messageText(msg) {
 /** Save a message record plus its preview thumbnail (if any). Returns true when the message is new. */
 export function storeRecord(rec, processed = 0) {
   const isNew = store.saveMessage(rec, processed);
-  if (rec.thumb) import("./media.js").then((m) => m.rememberThumb(rec));
+  if (rec.thumb || (isNew && rec.mediaType)) {
+    import("./media.js").then((m) => {
+      if (rec.thumb) m.rememberThumb(rec); // shown until the full picture arrives
+      if (isNew) m.autoDownload(rec);
+    });
+  }
   return isNew;
 }
 export const mediaKind = (msg) => (MEDIA_TYPES.has(msg.type) && msg.hasMedia ? msg.type : null);
@@ -270,6 +275,15 @@ function createClient({ onReady } = {}) {
   });
 
   // Edited messages: keep the original text alongside the new one.
+  // Unread count changed (a new message, or the chat was read on the phone): update the cached chat list right away.
+  client.on("unread_count", (chat) => {
+    const e = chatListCache.list.find((c) => c.id === chat?.id?._serialized);
+    if (e && e.unread !== (chat.unreadCount || 0)) {
+      e.unread = chat.unreadCount || 0;
+      if (!e.unread) console.log(`[chats] read on the phone: ${e.name}`);
+    }
+  });
+
   client.on("message_edit", (msg, newBody, prevBody) => {
     try {
       const id = msg.id?._serialized;

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
-import { DATA_DIR } from "./config.js";
+import { DATA_DIR, config } from "./config.js";
 import * as store from "./db.js";
 import { getClient, state } from "./whatsapp.js";
 
@@ -25,7 +25,8 @@ let working = false;
 /** Download attachments for these message ids in the background (skips ones already stored). */
 export function queueMedia(ids, { first = false } = {}) {
   for (const id of ids) {
-    if (queued.has(id) || store.getMedia(id)) continue;
+    const row = store.getMedia(id);
+    if (queued.has(id) || (row && row.status !== "thumb")) continue;
     queued.add(id);
     if (first) queue.unshift(id); else queue.push(id);
   }
@@ -99,6 +100,38 @@ async function download(id) {
   }
   store.saveMedia({ msg_id: id, status: "ok", mimetype, filename: m.filename || msg._data?.filename || null, path: file, size: buf.length });
   makePreview(id).catch(() => {});
+}
+
+const autoTypes = () => [config.autoDownloadVoice && "ptt", config.autoDownloadImages && "image"].filter(Boolean);
+const AUTO_LABEL = { ptt: "הודעה קולית", image: "תמונה" };
+
+/**
+ * Voice notes and pictures: download the recent ones that are not on this Mac yet, and delete the files of
+ * ones downloaded more than MEDIA_KEEP_DAYS ago (the message stays; the chat offers to download it again).
+ */
+export function maintainAutoMedia() {
+  const days = config.mediaKeepDays;
+  const since = days ? Math.floor(Date.now() / 1000) - days * 86400 : 0;
+  if (autoTypes().length) queueMedia(store.autoMediaToFetch(autoTypes(), since));
+  if (!days) return;
+  let n = 0;
+  for (const row of store.oldAutoMedia(["ptt", "image"], days)) {
+    const safe = row.msg_id.replace(/[^A-Za-z0-9_.-]/g, "_");
+    // the file itself, the original .ogg a voice note was converted from, and a picture's blurred preview
+    for (const f of [row.path, row.thumb, path.join(MEDIA_DIR, `${safe}.ogg`), path.join(MEDIA_DIR, `${safe}.thumb.jpg`)]) {
+      try { if (f) fs.rmSync(f, { force: true }); } catch {}
+    }
+    store.saveMedia({ msg_id: row.msg_id, status: "expired", error: `נמחק מהמחשב אחרי ${days} ימים` });
+    n++;
+  }
+  if (n) console.log(`[media] deleted ${n} voice notes / pictures older than ${days} days`);
+}
+
+/** A voice note or picture that just arrived: fetch it right away. */
+export function autoDownload(rec) {
+  if (!autoTypes().includes(rec.mediaType)) return;
+  if (config.mediaKeepDays && rec.ts < Date.now() / 1000 - config.mediaKeepDays * 86400) return;
+  queueMedia([rec.id]);
 }
 
 export const isQueued = (id) => queued.has(id);

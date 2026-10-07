@@ -26,12 +26,23 @@ export const config = {
   onlyChats: list(process.env.ONLY_CHATS),
   skipChats: list(process.env.SKIP_CHATS),
   port: Number(process.env.PORT || 3123),
+  // Blank = no password, dashboard open to the whole Wi-Fi network. See src/auth.js.
+  dashboardPassword: process.env.DASHBOARD_PASSWORD || "",
+  // Requests from this Mac itself skip the password, so the desktop app keeps working.
+  trustLocalhost: (process.env.DASHBOARD_TRUST_LOCALHOST || "true").toLowerCase() !== "false",
+  // Interface to bind. Default 0.0.0.0 reaches the phone; 127.0.0.1 locks it to this Mac only.
+  bindHost: process.env.BIND_HOST || "0.0.0.0",
   calendarName: process.env.CALENDAR_SYNC === "false" ? "" : (process.env.CALENDAR_NAME || "מעקב פגישות"),
   calendarMeetingMinutes: Number(process.env.CALENDAR_MEETING_MINUTES || 60),
   calendarCallMinutes: Number(process.env.CALENDAR_CALL_MINUTES || 30),
   calendarAlarmMinutes: Number(process.env.CALENDAR_ALARM_MINUTES ?? 30),
   autoUpdate: (process.env.AUTO_UPDATE || "true").toLowerCase() !== "false",
   autoUpdateHours: Number(process.env.AUTO_UPDATE_HOURS || 24),
+  // Voice notes and pictures download by themselves as they arrive; the files are deleted from this Mac
+  // after MEDIA_KEEP_DAYS (0 = keep forever).
+  autoDownloadVoice: (process.env.AUTO_DOWNLOAD_VOICE || "true").toLowerCase() !== "false",
+  autoDownloadImages: (process.env.AUTO_DOWNLOAD_IMAGES || "true").toLowerCase() !== "false",
+  mediaKeepDays: Number(process.env.MEDIA_KEEP_DAYS ?? process.env.VOICE_KEEP_DAYS ?? 14),
   noReplyHours: Number(process.env.NO_REPLY_HOURS ?? 24),
   autoClosePastHours: Number(process.env.AUTO_CLOSE_PAST_HOURS ?? 12),
   dailyDigestTime: process.env.DAILY_DIGEST_TIME || "",

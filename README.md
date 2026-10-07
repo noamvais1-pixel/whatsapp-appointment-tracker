@@ -133,6 +133,48 @@ URLs. Long unlabelled numbers land in their own `מספר` tab rather than pollu
 
 Endpoints: `GET /api/refs` (JSON) and `GET /api/refs/export` (plain text).
 
+## Opening it on your phone
+
+The dashboard listens on every network interface, so any device on the same Wi-Fi can reach
+it. Find this Mac's address and open it in the phone's browser:
+
+```sh
+ipconfig getifaddr en0          # Wi-Fi.  en1 if you are on Ethernet.
+```
+
+Then on the phone: `http://<that-address>:3123`. The tracker prints the same URL when it
+starts. Both devices have to be on the same Wi-Fi, and the Mac has to be awake.
+
+**Read this before you do.** The dashboard shows raw message content - bank details, ID
+numbers, addresses. Without `DASHBOARD_PASSWORD` set in `.env`, *anyone* on that network can
+open the same URL and read all of it. No password, no prompt. That is fine on a home network
+you control and a bad idea on café, hotel, office or campus Wi-Fi.
+
+| `.env` setting | Effect |
+|---|---|
+| `DASHBOARD_PASSWORD=` *(blank)* | No gate. Open to everyone on the network. |
+| `DASHBOARD_PASSWORD=something` | Phone asks for the password once, then remembers it for 30 days. |
+| `DASHBOARD_TRUST_LOCALHOST=true` *(default)* | This Mac skips the password, so the desktop app is unaffected. |
+| `BIND_HOST=127.0.0.1` | Locks the dashboard to this Mac. Nothing on the network can reach it. |
+
+The password travels over plain HTTP, so it keeps honest people out; it is not protection
+against someone capturing traffic on the network. To sign a device out again, delete
+`data/session-secret` and restart - every saved login stops working.
+
+### Adding it to the home screen
+
+In Safari on the phone: **Share → Add to Home Screen**. It then opens full-screen with its
+own icon instead of as a browser tab. It is still the same local server, so it only works
+when the Mac is awake and on the same Wi-Fi - there is no offline copy of your data.
+
+### Reaching it from outside the house
+
+Not set up, deliberately. It would need a tunnel or port-forward, which puts this server on
+the public internet. Before doing that you would want the password gate on, HTTPS so the
+password is not sent in the clear, and preferably a VPN back to the house instead of an open
+port. A WhatsApp archive on a public URL behind one shared password is a bigger risk than it
+looks.
+
 ## Settings (`.env`)
 
 | Setting | What it does |

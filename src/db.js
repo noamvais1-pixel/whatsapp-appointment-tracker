@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS meta (
 // Media attachments (voice notes, images, videos, documents) downloaded on demand.
 db.exec(`CREATE TABLE IF NOT EXISTS media (
   msg_id TEXT PRIMARY KEY,
-  status TEXT NOT NULL,          -- ok | failed | too_large
+  status TEXT NOT NULL,          -- ok | failed | too_large | expired
   mimetype TEXT, filename TEXT, path TEXT, size INTEGER, error TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`);
@@ -101,6 +101,16 @@ const stmts = {
   staleFailedMedia: db.prepare(
     `SELECT md.msg_id FROM media md JOIN messages m ON m.id = md.msg_id
       WHERE md.status = 'failed' AND m.chat_id = ? AND m.ts >= ? AND md.created_at < datetime('now', '-30 minutes')`,
+  ),
+  // auto-kept types are passed as a JSON array, e.g. ["ptt","image"]
+  autoMediaToFetch: db.prepare(
+    `SELECT m.id FROM messages m LEFT JOIN media md ON md.msg_id = m.id
+      WHERE m.media_type IN (SELECT value FROM json_each(?)) AND m.ts >= ? AND (md.msg_id IS NULL OR md.status = 'thumb')
+      ORDER BY m.ts DESC`,
+  ),
+  oldAutoMedia: db.prepare(
+    `SELECT md.* FROM media md JOIN messages m ON m.id = md.msg_id
+      WHERE m.media_type IN (SELECT value FROM json_each(?)) AND md.status = 'ok' AND md.created_at < datetime('now', ?)`,
   ),
   unprocessedChats: db.prepare(
     `SELECT chat_id, chat_name, COUNT(*) AS n, MIN(ts) AS oldest FROM messages WHERE processed = 0 GROUP BY chat_id ORDER BY oldest`,
@@ -171,6 +181,8 @@ export const getMedia = (id) => stmts.getMedia.get(id);
 export const saveMedia = (r) => stmts.saveMedia.run(r.msg_id, r.status, r.mimetype ?? null, r.filename ?? null, r.path ?? null, r.size ?? null, r.error ?? null);
 export const deleteMedia = (id) => stmts.deleteMedia.run(id);
 export const setMediaThumb = (id, path) => stmts.setMediaThumb.run(path, id);
+export const autoMediaToFetch = (types, sinceTs) => stmts.autoMediaToFetch.all(JSON.stringify(types), sinceTs).map((r) => r.id);
+export const oldAutoMedia = (types, days) => stmts.oldAutoMedia.all(JSON.stringify(types), `-${days} days`);
 export const staleFailedMedia = (chatId, sinceTs) => stmts.staleFailedMedia.all(chatId, sinceTs).map((r) => r.msg_id);
 export const recentMessages = (chatId, limit = 60) => stmts.recentMessages.all(chatId, limit).reverse();
 export const unprocessedChats = () => stmts.unprocessedChats.all();

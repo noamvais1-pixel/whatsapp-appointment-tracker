@@ -11,6 +11,7 @@ import { summary } from "./status.js";
 import { syncCalendar } from "./calendar.js";
 import { startUpdater } from "./updater.js";
 import { notify } from "./notify.js";
+import { maintainAutoMedia } from "./media.js";
 
 if (!config.geminiKey) {
   console.error("\nGEMINI_API_KEY is not set. Open the .env file, paste your Gemini API key after GEMINI_API_KEY=, then run again.\n");
@@ -34,8 +35,11 @@ startClient({
   onReady: () => {
     console.log("[tracker] watching for new messages");
     checkNoReplies().catch((e) => console.error("[noreply]", e.message));
+    try { maintainAutoMedia(); } catch (e) { console.error("[media]", e.message); }
   },
 });
+// Download voice notes and pictures that were missed and delete the ones past MEDIA_KEEP_DAYS, every hour.
+setInterval(() => { try { maintainAutoMedia(); } catch (e) { console.error("[media]", e.message); } }, 60 * 60_000);
 setInterval(() => {
   if (state.status !== "ready" || state.backfill) return;
   try { closePastAppointments(); } catch (e) { console.error("[expire]", e.message); }
