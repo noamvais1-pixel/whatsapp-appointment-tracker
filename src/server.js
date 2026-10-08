@@ -418,8 +418,9 @@ const PAGE = /* html */ `<!doctype html>
   .b{max-width:82%;padding:8px 11px;border-radius:16px;font-size:14px;white-space:pre-wrap;word-break:break-word;align-self:flex-start;
     background:rgba(255,255,255,.78);border:1px solid rgba(255,255,255,.7);box-shadow:0 2px 8px rgba(25,35,70,.08);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
   .b.me{background:rgba(205,248,214,.82);align-self:flex-end}.b .t{display:block;font-size:11px;color:var(--muted);margin-top:3px;text-align:left}
-  /* each line takes its direction from its own text, so English ends with its punctuation and Hebrew stays RTL */
-  .b .tx,textarea,input:not([type]){unicode-bidi:plaintext;text-align:start}
+  /* each line takes its direction from its own text, so English ends with its punctuation and Hebrew stays RTL.
+     Not on text boxes: there WebKit leaves the cursor at the left edge while English is typed (setDir handles them) */
+  .b .tx{unicode-bidi:plaintext;text-align:start}
   .b.hl{outline:2px solid var(--accent)}
   .b.del{border-color:rgba(180,71,29,.45)}.b .flag{display:block;font-size:11px;color:var(--warn);margin-top:3px}.b .flag.ed{color:var(--muted);cursor:help}
   .compose{display:flex;gap:8px;padding:10px 12px;border-top:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.25)}.compose textarea{flex:1;resize:none;height:44px}
@@ -621,7 +622,7 @@ async function checkNow(){ if(checking) return; const b=document.getElementById(
   try{ await fetch('/api/process',{method:'POST',headers:{'content-type':'application/json'},body:'{}'}); }catch{}
   const t0=Date.now(); const tick=setInterval(async()=>{ await load(); const busy=S&&(S.backfill||S.stats.pending>0); b.textContent=busy?('בודק… '+(S.backfill?S.backfill.done+'/'+S.backfill.total:S.stats.pending+' ממתינות')):'הבדיקה הושלמה ✓'; if(!busy||Date.now()-t0>600000){ clearInterval(tick); setTimeout(()=>{b.textContent='לבדוק הודעות חדשות עכשיו'; b.disabled=false; checking=false;},2500); } },3000); }
 function editWhen(id){ const it=S.items.find(i=>i.id===id); const v=prompt('תאריך ושעה (YYYY-MM-DD או YYYY-MM-DD HH:MM):',(it.when_iso||'').replace('T',' ')); if(v==null) return; run('/api/items/'+id,{when_iso:v.trim().replace(' ','T')||null}); }
-function addItem(e){ e.preventDefault(); const title=document.getElementById('ntitle').value.trim(); if(!title) return false; run('/api/items',{type:document.getElementById('ntype').value,title,when_iso:document.getElementById('nwhen').value||null}); document.getElementById('ntitle').value=''; document.getElementById('nwhen').value=''; return false; }
+function addItem(e){ e.preventDefault(); const title=document.getElementById('ntitle').value.trim(); if(!title) return false; run('/api/items',{type:document.getElementById('ntype').value,title,when_iso:document.getElementById('nwhen').value||null}); document.getElementById('ntitle').value=''; setDir(document.getElementById('ntitle')); document.getElementById('nwhen').value=''; return false; }
 async function switchPhone(){
   if(S.status==='ready'&&!confirm('לנתק את '+(S.me||'הטלפון הזה')+' מהמעקב?\\n\\nהמכשיר המקושר יוסר מהטלפון ויופיע כאן קוד QR חדש.')) return;
   const clearData=confirm('למחוק גם את הפגישות, המעקבים וההודעות שהגיעו מהטלפון הנוכחי?\\n\\nאישור = למחוק (התחלה נקייה לטלפון החדש)\\nביטול = לשמור אותם');
@@ -654,7 +655,7 @@ async function startChatByNumber(num){ let r, j; try{ r=await fetch('/api/chats/
   if(r.status===404){ alert('המספר '+(j.phone||num)+' לא רשום בוואטסאפ.'); return; }
   if(r.status===409){ alert('וואטסאפ לא מחובר כרגע, אי אפשר לפתוח צ\\'אט חדש.'); return; }
   if(!r.ok){ alert('לא הצלחתי לפתוח את הצ\\'אט: '+(j.error||r.status)); return; }
-  document.getElementById('csearch').value=''; const c=chats.find(x=>x.id===j.chatId);
+  document.getElementById('csearch').value=''; setDir(document.getElementById('csearch')); const c=chats.find(x=>x.id===j.chatId);
   await showChat({chatId:j.chatId, name:c?c.name:j.phone, msgId:null}); renderChats(); }
 async function openChatById(chatId){ const c=chats.find(x=>x.id===chatId); await showChat({chatId, name:c?c.name:chatId, msgId:null}); renderChats(); }
 async function openChat(itemId){ const it=S.items.find(i=>i.id===itemId); if(!it||!it.chat_id){ alert('הפריט הזה לא מקושר לצ\\'אט.'); return; }
@@ -740,10 +741,13 @@ async function sendMsg(){ if(!cur) return; const ta=document.getElementById('pte
   if(pending){ ta.disabled=true; document.getElementById('psent').textContent='שולח קובץ…';
     const r=await fetch('/api/chats/'+encodeURIComponent(cur.chatId)+'/send-file',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:pending.name,mimetype:pending.mimetype,data:pending.data,caption:text})}); const j=await r.json().catch(()=>({})); ta.disabled=false;
     if(!r.ok){ document.getElementById('psent').textContent=''; alert('השליחה נכשלה: '+(j.error||r.status)); return; }
-    clearAttach(); ta.value=''; document.getElementById('psent').textContent='נשלח ✓'; setTimeout(()=>document.getElementById('psent').textContent='',2500); setTimeout(()=>{loadChat(true);load();},2000); return; }
+    clearAttach(); ta.value=''; setDir(ta); document.getElementById('psent').textContent='נשלח ✓'; setTimeout(()=>document.getElementById('psent').textContent='',2500); setTimeout(()=>{loadChat(true);load();},2000); return; }
   if(!text) return; ta.disabled=true;
   const r=await fetch('/api/chats/'+encodeURIComponent(cur.chatId)+'/send',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text})}); const j=await r.json(); ta.disabled=false;
-  if(!r.ok){ alert('השליחה נכשלה: '+(j.error||r.status)); return; } ta.value=''; document.getElementById('psent').textContent='נשלח ✓'; setTimeout(()=>document.getElementById('psent').textContent='',2500); setTimeout(()=>{loadChat(true);load();},1500); }
+  if(!r.ok){ alert('השליחה נכשלה: '+(j.error||r.status)); return; } ta.value=''; setDir(ta); document.getElementById('psent').textContent='נשלח ✓'; setTimeout(()=>document.getElementById('psent').textContent='',2500); setTimeout(()=>{loadChat(true);load();},1500); }
+// text boxes take their direction from the first letter typed (English -> left-to-right, Hebrew or empty -> right-to-left)
+function setDir(el){ const m=el.value.match(/[A-Za-z\\u00C0-\\u024F\\u0590-\\u05FF\\u0600-\\u06FF]/); el.dir=m&&/[A-Za-z\\u00C0-\\u024F]/.test(m[0])?'ltr':'rtl'; }
+document.addEventListener('input',e=>{ if(e.target.matches('textarea,input:not([type])')) setDir(e.target); });
 document.getElementById('ptext').addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendMsg(); } });
 
 /* ---- מספרים וקישורים ---- */
