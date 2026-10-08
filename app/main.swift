@@ -39,8 +39,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
         window.setFrameAutosaveName("MainWindow")
         window.center()
 
+        // red underline under misspelled words while typing (Hebrew + English). Only a default:
+        // turning it off in the Spelling menu is remembered.
+        UserDefaults.standard.register(defaults: ["WebContinuousSpellCheckingEnabled": true])
+
         let cfg = WKWebViewConfiguration()
         cfg.preferences.javaScriptCanOpenWindowsAutomatically = false
+        // gray word completions while typing, when they are on in System Settings > Keyboard
+        if #available(macOS 14.0, *) { cfg.allowsInlinePredictions = true }
         // tell the page it runs inside the native window, so it can use a transparent background
         let mark = WKUserScript(source: "document.documentElement.classList.add('native')", injectionTime: .atDocumentStart, forMainFrameOnly: true)
         cfg.userContentController.addUserScript(mark)
@@ -131,7 +137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
         completionHandler(a.runModal() == .alertFirstButtonReturn ? field.stringValue : nil)
     }
 
-    // Minimal menu so Cmd+Q / Cmd+C / Cmd+V / Cmd+R work.
+    // Minimal menu so Cmd+Q / Cmd+C / Cmd+V / Cmd+R and spelling work.
     func buildMenu() {
         let main = NSMenu()
         let appItem = NSMenuItem(); main.addItem(appItem)
@@ -149,6 +155,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
         edit.addItem(withTitle: "העתק", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         edit.addItem(withTitle: "הדבק", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         edit.addItem(withTitle: "בחר הכל", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        edit.addItem(.separator())
+        // spelling: the web view handles these and shows the check marks; right-click a word for suggestions
+        let spellItem = NSMenuItem(title: "איות ודקדוק", action: nil, keyEquivalent: "")
+        let spell = NSMenu(title: "איות ודקדוק")
+        spell.addItem(withTitle: "הצג איות ודקדוק", action: #selector(NSText.showGuessPanel(_:)), keyEquivalent: ":")
+        spell.addItem(withTitle: "בדוק את המסמך כעת", action: #selector(NSText.checkSpelling(_:)), keyEquivalent: ";")
+        spell.addItem(.separator())
+        spell.addItem(withTitle: "בדוק איות בזמן ההקלדה", action: #selector(NSTextView.toggleContinuousSpellChecking(_:)), keyEquivalent: "")
+        spell.addItem(withTitle: "בדוק דקדוק עם איות", action: #selector(NSTextView.toggleGrammarChecking(_:)), keyEquivalent: "")
+        spell.addItem(withTitle: "תקן איות באופן אוטומטי", action: #selector(NSTextView.toggleAutomaticSpellingCorrection(_:)), keyEquivalent: "")
+        spellItem.submenu = spell
+        edit.addItem(spellItem)
         editItem.submenu = edit
         NSApp.mainMenu = main
     }

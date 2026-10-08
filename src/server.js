@@ -15,6 +15,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { processPending } from "./processor.js";
+import { checkSpelling, learnWord, warmUpSpelling } from "./spell.js";
 
 // Group messages often carry only the sender's WhatsApp id (…@lid); show the contact's name or number instead.
 const senderNames = new Map();
@@ -117,6 +118,11 @@ export function startServer(getClient) {
     if (!png) return res.status(404).end();
     res.type("image/png").send(png);
   });
+
+  // Spelling suggestions for the text boxes (the Mac's own speller, Hebrew + English).
+  app.post("/api/spell", async (req, res) => res.json(await checkSpelling(req.body?.text)));
+  app.post("/api/spell/learn", async (req, res) => res.json(await learnWord(req.body?.word)));
+  warmUpSpelling();
 
   // Send an image or a file through the linked account. Body: { name, mimetype, data (base64), caption, asDocument }
   app.post("/api/chats/:chatId/send-file", async (req, res) => {
@@ -425,6 +431,12 @@ const PAGE = /* html */ `<!doctype html>
   .b.del{border-color:rgba(180,71,29,.45)}.b .flag{display:block;font-size:11px;color:var(--warn);margin-top:3px}.b .flag.ed{color:var(--muted);cursor:help}
   .compose{display:flex;gap:8px;padding:10px 12px;border-top:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.25)}.compose textarea{flex:1;resize:none;height:44px}
   .sent{font-size:12px;color:var(--accent);padding:0 14px 8px}
+  /* spelling: words the Mac's speller doesn't know, with suggestions to click */
+  .spell{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;padding:8px 12px 0;font-size:13px}.spell[hidden]{display:none}
+  .spell .sw{display:inline-flex;align-items:center;gap:5px;flex-wrap:wrap}
+  .spell .bad{font-weight:600;text-decoration:underline wavy #e5484d;text-underline-offset:3px}
+  .spell button{padding:3px 10px;font-size:12.5px}.spell button.ok{color:var(--muted)}
+  #nspell{padding:0 4px;margin:-8px 0 14px}
   .attach{display:flex;align-items:center;gap:10px;padding:8px 12px 0;font-size:13px}.attach img{max-height:120px;max-width:180px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:#fff}
   .attach .big{font-size:34px;width:56px;height:56px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:rgba(255,255,255,.7)}
   .attach .nm{display:flex;flex-direction:column;gap:2px}
@@ -519,6 +531,7 @@ const PAGE = /* html */ `<!doctype html>
     .compose textarea{height:46px}
     .compose .clip{min-height:46px;padding:0 14px}
     .compose button{min-height:46px}
+    .spell button{min-height:34px}
 
     /* media was pinned to desktop pixel widths and overflowed the bubble */
     .mimg,.mvid,.mdoc{max-width:100%}
@@ -545,22 +558,24 @@ const PAGE = /* html */ `<!doctype html>
 <div id="alerts"></div>
 <div id="qr" class="qr" style="display:none"><div style="margin-bottom:10px">בטלפון שרוצים לעקוב אחריו: <b>וואטסאפ ← הגדרות ← מכשירים מקושרים ← קישור מכשיר</b>, ואז לסרוק:</div><img id="qrimg" alt="קוד QR"></div>
 <form class="add" onsubmit="return addItem(event)"><select id="ntype"><option value="follow_up">מעקב</option><option value="meeting">פגישה</option><option value="call">שיחה</option></select>
-<input class="t" id="ntitle" placeholder="להוסיף משהו בעצמך, למשל: להתקשר לבנק בקשר לכרטיס"><input id="nwhen" type="datetime-local"><button class="primary">הוספה</button></form>
+<input class="t" id="ntitle" spellcheck="true" placeholder="להוסיף משהו בעצמך, למשל: להתקשר לבנק בקשר לכרטיס"><input id="nwhen" type="datetime-local"><button class="primary">הוספה</button></form>
+<div class="spell" id="nspell" hidden></div>
 <div id="tasksview">
 <nav id="tabs"></nav>
 <div id="list"></div>
 </div>
 <div id="refsview">
-<div class="rtools"><input id="rsearch" placeholder="חיפוש מספר, קישור, שם או מילה מההודעה…" oninput="renderRefs()"><button onclick="copyAllRefs()">העתקת הכל</button></div>
+<div class="rtools"><input id="rsearch" spellcheck="false" autocorrect="off" placeholder="חיפוש מספר, קישור, שם או מילה מההודעה…" oninput="renderRefs()"><button onclick="copyAllRefs()">העתקת הכל</button></div>
 <nav id="rtabs"></nav>
 <div id="rlist"></div>
 </div>
-<div id="chatsview"><div class="clist"><div class="csrow"><input id="csearch" placeholder="חיפוש צ'אט או מספר טלפון…" oninput="renderChats()"><button class="newchat" title="צ'אט חדש לפי מספר טלפון" onclick="newChatPrompt()">＋ מספר</button></div><div class="cl" id="clist"></div></div><div id="cslot" class="cempty">בוחרים צ'אט מהרשימה</div></div>
+<div id="chatsview"><div class="clist"><div class="csrow"><input id="csearch" spellcheck="false" autocorrect="off" placeholder="חיפוש צ'אט או מספר טלפון…" oninput="renderChats()"><button class="newchat" title="צ'אט חדש לפי מספר טלפון" onclick="newChatPrompt()">＋ מספר</button></div><div class="cl" id="clist"></div></div><div id="cslot" class="cempty">בוחרים צ'אט מהרשימה</div></div>
 </main>
 <div id="panel"><div class="ph"><b id="pname"><span id="pname-t"></span><span class="pn" id="pphone"></span></b><span id="pstatus" class="stat"></span><button onclick="closeChat()">סגירה</button></div>
 <div class="msgs" id="pmsgs"></div><div class="sent" id="psent"></div>
 <div class="attach" id="pattach" hidden></div>
-<div class="compose"><button class="clip" title="לצרף תמונה או קובץ" onclick="document.getElementById('pfile').click()">📎</button><input type="file" id="pfile" hidden onchange="pickFile(this.files[0]); this.value=''"><button class="clip" id="pmic" title="להקליט הודעה קולית" onclick="toggleRec()">🎤</button><textarea id="ptext" placeholder="לכתוב הודעה… (Enter לשליחה, Shift+Enter לשורה חדשה)"></textarea><button class="primary" onclick="sendMsg()">שליחה</button></div></div>
+<div class="spell" id="pspell" hidden></div>
+<div class="compose"><button class="clip" title="לצרף תמונה או קובץ" onclick="document.getElementById('pfile').click()">📎</button><input type="file" id="pfile" hidden onchange="pickFile(this.files[0]); this.value=''"><button class="clip" id="pmic" title="להקליט הודעה קולית" onclick="toggleRec()">🎤</button><textarea id="ptext" spellcheck="true" placeholder="לכתוב הודעה… (Enter לשליחה, Shift+Enter לשורה חדשה)"></textarea><button class="primary" onclick="sendMsg()">שליחה</button></div></div>
 <script>
 const ICON={meeting:'📅',call:'📞',follow_up:'✅'};
 const L='he-IL';
@@ -622,7 +637,7 @@ async function checkNow(){ if(checking) return; const b=document.getElementById(
   try{ await fetch('/api/process',{method:'POST',headers:{'content-type':'application/json'},body:'{}'}); }catch{}
   const t0=Date.now(); const tick=setInterval(async()=>{ await load(); const busy=S&&(S.backfill||S.stats.pending>0); b.textContent=busy?('בודק… '+(S.backfill?S.backfill.done+'/'+S.backfill.total:S.stats.pending+' ממתינות')):'הבדיקה הושלמה ✓'; if(!busy||Date.now()-t0>600000){ clearInterval(tick); setTimeout(()=>{b.textContent='לבדוק הודעות חדשות עכשיו'; b.disabled=false; checking=false;},2500); } },3000); }
 function editWhen(id){ const it=S.items.find(i=>i.id===id); const v=prompt('תאריך ושעה (YYYY-MM-DD או YYYY-MM-DD HH:MM):',(it.when_iso||'').replace('T',' ')); if(v==null) return; run('/api/items/'+id,{when_iso:v.trim().replace(' ','T')||null}); }
-function addItem(e){ e.preventDefault(); const title=document.getElementById('ntitle').value.trim(); if(!title) return false; run('/api/items',{type:document.getElementById('ntype').value,title,when_iso:document.getElementById('nwhen').value||null}); document.getElementById('ntitle').value=''; setDir(document.getElementById('ntitle')); document.getElementById('nwhen').value=''; return false; }
+function addItem(e){ e.preventDefault(); const title=document.getElementById('ntitle').value.trim(); if(!title) return false; run('/api/items',{type:document.getElementById('ntype').value,title,when_iso:document.getElementById('nwhen').value||null}); resetBox(document.getElementById('ntitle')); document.getElementById('nwhen').value=''; return false; }
 async function switchPhone(){
   if(S.status==='ready'&&!confirm('לנתק את '+(S.me||'הטלפון הזה')+' מהמעקב?\\n\\nהמכשיר המקושר יוסר מהטלפון ויופיע כאן קוד QR חדש.')) return;
   const clearData=confirm('למחוק גם את הפגישות, המעקבים וההודעות שהגיעו מהטלפון הנוכחי?\\n\\nאישור = למחוק (התחלה נקייה לטלפון החדש)\\nביטול = לשמור אותם');
@@ -741,13 +756,46 @@ async function sendMsg(){ if(!cur) return; const ta=document.getElementById('pte
   if(pending){ ta.disabled=true; document.getElementById('psent').textContent='שולח קובץ…';
     const r=await fetch('/api/chats/'+encodeURIComponent(cur.chatId)+'/send-file',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:pending.name,mimetype:pending.mimetype,data:pending.data,caption:text})}); const j=await r.json().catch(()=>({})); ta.disabled=false;
     if(!r.ok){ document.getElementById('psent').textContent=''; alert('השליחה נכשלה: '+(j.error||r.status)); return; }
-    clearAttach(); ta.value=''; setDir(ta); document.getElementById('psent').textContent='נשלח ✓'; setTimeout(()=>document.getElementById('psent').textContent='',2500); setTimeout(()=>{loadChat(true);load();},2000); return; }
+    clearAttach(); resetBox(ta); document.getElementById('psent').textContent='נשלח ✓'; setTimeout(()=>document.getElementById('psent').textContent='',2500); setTimeout(()=>{loadChat(true);load();},2000); return; }
   if(!text) return; ta.disabled=true;
   const r=await fetch('/api/chats/'+encodeURIComponent(cur.chatId)+'/send',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text})}); const j=await r.json(); ta.disabled=false;
-  if(!r.ok){ alert('השליחה נכשלה: '+(j.error||r.status)); return; } ta.value=''; setDir(ta); document.getElementById('psent').textContent='נשלח ✓'; setTimeout(()=>document.getElementById('psent').textContent='',2500); setTimeout(()=>{loadChat(true);load();},1500); }
+  if(!r.ok){ alert('השליחה נכשלה: '+(j.error||r.status)); return; } resetBox(ta); document.getElementById('psent').textContent='נשלח ✓'; setTimeout(()=>document.getElementById('psent').textContent='',2500); setTimeout(()=>{loadChat(true);load();},1500); }
 // text boxes take their direction from the first letter typed (English -> left-to-right, Hebrew or empty -> right-to-left)
 function setDir(el){ const m=el.value.match(/[A-Za-z\\u00C0-\\u024F\\u0590-\\u05FF\\u0600-\\u06FF]/); el.dir=m&&/[A-Za-z\\u00C0-\\u024F]/.test(m[0])?'ltr':'rtl'; }
-document.addEventListener('input',e=>{ if(e.target.matches('textarea,input:not([type])')) setDir(e.target); });
+document.addEventListener('input',e=>{ if(e.target.matches('textarea,input:not([type])')) setDir(e.target); spellSoon(e.target,true); });
+function resetBox(el){ el.value=''; setDir(el); spellSoon(el); }
+
+/* ---- spelling: words the Mac's speller (Hebrew + English) doesn't know get a row of suggestions under the box ---- */
+const SPELL={ptext:'pspell',ntitle:'nspell'}; const spellT={}, spellN={}, spellCur={}, spellOk=new Set(); let spellOff=false;
+function spellSoon(el,typing){ if(spellOff||!SPELL[el.id]) return; clearTimeout(spellT[el.id]); spellT[el.id]=setTimeout(()=>spellCheck(el,typing),typing?450:0); }
+async function spellCheck(el,typing){ const text=el.value, n=spellN[el.id]=(spellN[el.id]||0)+1;
+  if(!text.trim()){ spellShow(el,[]); return; }
+  let j; try{ j=await (await fetch('/api/spell',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text})})).json(); }catch{ return; }
+  if(n!==spellN[el.id]||el.value!==text) return; // the text changed meanwhile; a newer check is on its way
+  if(!j.ok){ if(j.unavailable) spellOff=true; spellShow(el,[]); return; }
+  // the word the cursor is in is judged only once the user moves past it
+  const caret=document.activeElement===el?el.selectionEnd:-1;
+  spellShow(el,j.issues.filter(i=>!spellOk.has(i.word)&&!(typing&&caret>=i.start&&caret<=i.start+i.len))); }
+function spellShow(el,issues){ const box=document.getElementById(SPELL[el.id]), sig=JSON.stringify(issues);
+  if(box.dataset.sig===sig) return; box.dataset.sig=sig; spellCur[el.id]=issues.slice(0,3);
+  if(!issues.length){ box.hidden=true; box.innerHTML=''; return; }
+  box.hidden=false;
+  box.innerHTML='<span class="muted">בדיקת איות:</span>'+spellCur[el.id].map((i,k)=>'<span class="sw"><bdi class="bad">'+esc(i.word)+'</bdi>'
+    +(i.guesses.length?'<span class="muted">←</span>'+i.guesses.slice(0,3).map((g,m)=>'<button type="button" onclick="spellFix(\\''+el.id+'\\','+k+','+m+')"><bdi>'+esc(g)+'</bdi></button>').join(''):'<span class="muted">אין הצעות</span>')
+    +'<button type="button" class="ok" title="המילה נכונה: לא לסמן אותה יותר (נוספת למילון של המק)" onclick="spellLearn(\\''+el.id+'\\','+k+')">✓ נכון</button></span>').join('')
+    +(issues.length>3?'<span class="muted">ועוד '+(issues.length-3)+'</span>':''); }
+function spellFix(id,k,m){ const el=document.getElementById(id), i=spellCur[id]&&spellCur[id][k]; if(!i) return; const g=i.guesses[m];
+  if(el.value.substr(i.start,i.len)!==i.word){ spellSoon(el); return; }
+  const caret=el.selectionEnd, after=caret>=i.start+i.len?caret+g.length-i.len:caret;
+  el.focus(); el.setSelectionRange(i.start,i.start+i.len);
+  // insertText keeps Cmd+Z working; setRangeText is the fallback where it is not supported
+  if(!document.execCommand('insertText',false,g)) el.setRangeText(g,i.start,i.start+i.len,'end');
+  el.setSelectionRange(after,after); setDir(el); spellSoon(el); }
+function spellLearn(id,k){ const el=document.getElementById(id), i=spellCur[id]&&spellCur[id][k]; if(!i) return; spellOk.add(i.word);
+  fetch('/api/spell/learn',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({word:i.word})}).catch(()=>{}); spellSoon(el); }
+// clicking a suggestion must not take the focus (and the keyboard, on a phone) away from the text box
+for(const id of Object.values(SPELL)) document.getElementById(id).addEventListener('mousedown',e=>e.preventDefault());
+document.addEventListener('focusout',e=>{ if(SPELL[e.target.id]) spellSoon(e.target,false); });
 document.getElementById('ptext').addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendMsg(); } });
 
 /* ---- מספרים וקישורים ---- */
