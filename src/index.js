@@ -126,3 +126,9 @@ export async function shutdown() {
 }
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+
+// When WhatsApp logs the tracker out, whatsapp-web.js re-injects into the page twice at once and
+// throws where nothing catches it (2026-10-08: "window['onQRChangedEvent'] already exists").
+// Stay up instead of dying: the watchdog reconnects, the dashboard shows a fresh QR code and the
+// status notification tells the user to scan it.
+process.on("unhandledRejection", (e) => console.error("[error] unexpected:", e?.stack || e));
