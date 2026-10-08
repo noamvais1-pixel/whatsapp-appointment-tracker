@@ -94,7 +94,8 @@ keep it. Follow-ups are not added. macOS asks once for permission to control Cal
 
 **Deleted and edited messages.** Every message is stored the moment it arrives. If the sender
 later deletes it for everyone, it vanishes on the phone but stays here, marked in red with the
-deletion time. Edited messages show the new text with an "edited" marker; hover to see the
+deletion time. A message deleted while the app was off is usually marked once it runs again,
+without the time. Edited messages show the new text with an "edited" marker; hover to see the
 original. This only covers messages that arrived while the app was running.
 
 **Past appointments.** A meeting or call whose time passed more than 12 hours ago

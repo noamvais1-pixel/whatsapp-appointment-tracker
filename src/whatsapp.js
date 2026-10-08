@@ -401,8 +401,6 @@ export async function resolveAllPhones() {
   }
 }
 
-// WhatsApp now files private chats under an internal id (…@lid) whose title is just the number;
-// the name saved in the phone's address book sits on the separate phone-number contact (…@c.us).
 /**
  * Catch deletions the live event missed (made while the tracker was off, or during a reconnect):
  * WhatsApp Web still holds those messages as "deleted" placeholders that point at the original.
@@ -422,6 +420,8 @@ export async function markDeletedOnPage() {
   }
 }
 
+// WhatsApp now files private chats under an internal id (…@lid) whose title is just the number;
+// the name saved in the phone's address book sits on the separate phone-number contact (…@c.us).
 // Build a phone -> name map from the full contact list (refreshed every 10 minutes).
 let contactNames = { at: 0, byPhone: new Map(), byId: new Map() };
 let loadingNames = false;
