@@ -13,6 +13,13 @@ let wordRe = try! NSRegularExpression(pattern: "[\\p{L}\\p{M}]+(?:['’\"״׳][\
 let skipRe = try! NSRegularExpression(pattern: "(?:https?://|www\\.)\\S+|\\S+@\\S+\\.\\S+|[@#]\\S+", options: [.caseInsensitive])
 let maxIssues = 15
 
+func isHebrew(_ s: String) -> Bool { s.unicodeScalars.contains { $0.value >= 0x0590 && $0.value <= 0x05FF } }
+/** UTF-16 index of the first Latin letter, if any. */
+func firstLatin(_ s: String) -> Int? {
+    let u = Array(s.utf16)
+    return u.firstIndex { ($0 >= 0x41 && $0 <= 0x5A) || ($0 >= 0x61 && $0 <= 0x7A) || ($0 >= 0xC0 && $0 < 0x250 && $0 != 0xD7 && $0 != 0xF7) }
+}
+
 func check(_ text: String) -> [[String: Any]] {
     let ns = text as NSString
     let all = NSRange(location: 0, length: ns.length)
@@ -20,19 +27,34 @@ func check(_ text: String) -> [[String: Any]] {
     var issues: [[String: Any]] = []
     for m in wordRe.matches(in: text, range: all) {
         if issues.count >= maxIssues { break }
-        let r = m.range
+        var r = m.range
         if r.length < 2 || skips.contains(where: { NSIntersectionRange($0, r).length > 0 }) { continue }
-        let word = ns.substring(with: r)
-        let hebrew = word.unicodeScalars.contains { $0.value >= 0x0590 && $0.value <= 0x05FF }
-        let latin = word.unicodeScalars.contains { $0.value < 0x0250 }
-        if !hebrew && !latin { continue } // other scripts: no speller picked for them
+        var word = ns.substring(with: r)
+        var hebrew = isHebrew(word)
+        if hebrew, let k = firstLatin(word) {
+            // a Hebrew prefix on an English word (בZoom, לGoogle): judge only the English part
+            let rest = (word as NSString).substring(from: k)
+            if k > 4 || isHebrew(rest) || rest.utf16.count < 2 { continue }
+            r = NSRange(location: r.location + k, length: r.length - k)
+            word = rest
+            hebrew = false
+        }
+        if !hebrew && firstLatin(word) == nil { continue } // other scripts: no speller picked for them
         if !hebrew && word == word.uppercased() { continue } // OK, PDF, ASAP
         let lang = hebrew ? "he" : "en"
         let wr = NSRange(location: 0, length: r.length)
-        if sc.checkSpelling(of: word, startingAt: 0, language: lang, wrap: false, inSpellDocumentWithTag: tag, wordCount: nil).location == NSNotFound { continue }
+        let misspelled = { (w: String) in sc.checkSpelling(of: w, startingAt: 0, language: lang, wrap: false, inSpellDocumentWithTag: tag, wordCount: nil).location != NSNotFound }
+        // in Hebrew a keyboard apostrophe/quote stands for geresh/gershayim: ג'ינס is ג׳ינס (same length)
+        let probe = hebrew ? word.replacingOccurrences(of: "'", with: "׳").replacingOccurrences(of: "’", with: "׳").replacingOccurrences(of: "\"", with: "״") : word
+        if !misspelled(word) || (probe != word && !misspelled(probe)) { continue }
+        // the dictionary lacks prefixed loanwords (וצ׳יפס): try without up to 3 prefix letters
+        if probe != word, (1...3).contains(where: { n in
+            let p = String(probe.prefix(n)), rest = String(probe.dropFirst(n))
+            return p.allSatisfy { "ובכלמהש".contains($0) } && rest.count >= 2 && !misspelled(rest)
+        }) { continue }
         var guesses: [String] = []
-        if let c = sc.correction(forWordRange: wr, in: word, language: lang, inSpellDocumentWithTag: tag) { guesses.append(c) }
-        for g in sc.guesses(forWordRange: wr, in: word, language: lang, inSpellDocumentWithTag: tag) ?? [] where !guesses.contains(g) && !g.contains(" ") && !g.contains("-") {
+        if let c = sc.correction(forWordRange: wr, in: probe, language: lang, inSpellDocumentWithTag: tag) { guesses.append(c) }
+        for g in sc.guesses(forWordRange: wr, in: probe, language: lang, inSpellDocumentWithTag: tag) ?? [] where !guesses.contains(g) && !g.contains(" ") && !g.contains("-") {
             guesses.append(g)
         }
         issues.append(["start": r.location, "len": r.length, "word": word, "guesses": Array(guesses.prefix(4))])
