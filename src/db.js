@@ -88,7 +88,9 @@ const stmts = {
     `INSERT OR IGNORE INTO messages (id, chat_id, chat_name, from_me, sender, body, ts, processed, media_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ),
   setMediaType: db.prepare(`UPDATE messages SET media_type = ? WHERE id = ? AND media_type IS NULL`),
-  markDeleted: db.prepare(`UPDATE messages SET deleted_at = COALESCE(deleted_at, datetime('now')) WHERE id = ?`),
+  markDeleted: db.prepare(`UPDATE messages SET deleted_at = datetime('now') WHERE id = ? AND deleted_at IS NULL`),
+  // found already deleted on the page (e.g. deleted while the tracker was off): when it happened is not known
+  markDeletedEarlier: db.prepare(`UPDATE messages SET deleted_at = 'unknown' WHERE id = ? AND deleted_at IS NULL`),
   markEdited: db.prepare(`UPDATE messages SET edited_from = COALESCE(edited_from, ?), body = ? WHERE id = ?`),
   recentMessages: db.prepare(
     `SELECT m.*, md.status AS media_status, md.mimetype AS media_mime, md.filename AS media_filename, md.size AS media_size, md.error AS media_error, (md.thumb IS NOT NULL) AS media_thumb
@@ -176,6 +178,7 @@ export function saveMessage(m, processed = 0) {
   return r.changes > 0;
 }
 export const markDeleted = (id) => stmts.markDeleted.run(id).changes;
+export const markDeletedEarlier = (id) => stmts.markDeletedEarlier.run(id).changes;
 export const markEdited = (id, newBody, prevBody) => stmts.markEdited.run(prevBody, newBody, id).changes;
 export const getMedia = (id) => stmts.getMedia.get(id);
 export const saveMedia = (r) => stmts.saveMedia.run(r.msg_id, r.status, r.mimetype ?? null, r.filename ?? null, r.path ?? null, r.size ?? null, r.error ?? null);

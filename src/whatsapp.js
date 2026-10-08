@@ -102,6 +102,9 @@ export function storeRecord(rec, processed = 0) {
   return isNew;
 }
 export const mediaKind = (msg) => (MEDIA_TYPES.has(msg.type) && msg.hasMedia ? msg.type : null);
+// WhatsApp Web's minifier renamed a message key's _serialized to "$1". The patched library restores it
+// on msg.id, but not on protocolMessageKey (the key of a deleted message).
+const keyId = (k) => k?._serialized ?? k?.$1;
 
 export function toRecord(msg, chat) {
   const body = messageText(msg);
@@ -252,23 +255,26 @@ function createClient({ onReady } = {}) {
     await sleep(8000); // WhatsApp Web reloads itself right after linking; reading during that fails
     heartbeat().catch(() => {}); // prove the link is alive right away so the status line is honest from the start
     await runBackfill();
+    await markDeletedOnPage();
     onReady?.(client);
     processPending().catch((e) => console.error("[process]", e.message)); // analyse whatever the read found, in the background
     setTimeout(() => resolveAllPhones(), 60_000);
   });
 
   // "Delete for everyone": WhatsApp removes the text on the phone, but we already have it. Keep it, mark it.
+  // The deleted message is protocolMessageKey (msg.id is the "deleted" placeholder's own id, which we never stored).
   client.on("message_revoke_everyone", async (msg, before) => {
     try {
-      const id = before?.id?._serialized || msg.protocolMessageKey?._serialized || msg.id?._serialized;
+      const id = keyId(msg.protocolMessageKey) || keyId(before?.id);
       if (!id) return;
       if (before) {
+        // the library copies protocolMessageKey into before.id, so it has no _serialized either
+        before.id = { ...before.id, _serialized: id };
         // if the app somehow missed the original (e.g. arrived during a reconnect), store it now from the library's cache
         const chat = await msg.getChat().catch(() => null);
         if (chat && chatAllowed(chat)) { const rec = toRecord(before, chat); if (rec) storeRecord(rec); }
       }
-      const n = store.markDeleted(id);
-      console.log(`[msg] deleted for everyone ${n ? "(original kept)" : "(original not stored)"}: ${id.slice(-20)}`);
+      if (store.markDeleted(id)) console.log(`[msg] deleted for everyone (original kept): ${id.slice(-20)}`);
     } catch (e) {
       console.warn("[whatsapp] revoke handling:", String(e.message).slice(0, 100));
     }
@@ -397,6 +403,25 @@ export async function resolveAllPhones() {
 
 // WhatsApp now files private chats under an internal id (…@lid) whose title is just the number;
 // the name saved in the phone's address book sits on the separate phone-number contact (…@c.us).
+/**
+ * Catch deletions the live event missed (made while the tracker was off, or during a reconnect):
+ * WhatsApp Web still holds those messages as "deleted" placeholders that point at the original.
+ */
+export async function markDeletedOnPage() {
+  if (!current || state.status !== "ready") return;
+  try {
+    const ids = await withTimeout(current.pupPage.evaluate(() =>
+      window.require("WAWebCollections").Msg.getModelsArray()
+        .filter((m) => m.type === "revoked" && m.protocolMessageKey)
+        .map((m) => m.protocolMessageKey._serialized ?? m.protocolMessageKey.$1)), 30000);
+    let n = 0;
+    for (const id of ids) if (id) n += store.markDeletedEarlier(id);
+    if (n) console.log(`[msg] ${n} messages were deleted for everyone earlier (originals kept)`);
+  } catch (e) {
+    console.warn("[whatsapp] could not check for deleted messages:", String(e.message).slice(0, 100));
+  }
+}
+
 // Build a phone -> name map from the full contact list (refreshed every 10 minutes).
 let contactNames = { at: 0, byPhone: new Map(), byId: new Map() };
 let loadingNames = false;

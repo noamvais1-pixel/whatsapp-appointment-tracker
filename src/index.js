@@ -1,5 +1,5 @@
 import { config } from "./config.js";
-import { startClient, getClient, state, sendToSelf, hardReconnect } from "./whatsapp.js";
+import { startClient, getClient, state, sendToSelf, hardReconnect, markDeletedOnPage } from "./whatsapp.js";
 import { startServer } from "./server.js";
 import { processPending } from "./processor.js";
 import { buildDigest, localDateKey } from "./digest.js";
@@ -79,6 +79,9 @@ startUpdater();
 // Mirror meetings and calls into the Mac Calendar (which iCloud carries to the iPhone).
 setTimeout(() => syncCalendar(), 30_000);
 setInterval(() => syncCalendar(), 3 * 60_000);
+
+// Deletions the live event missed (e.g. during a reconnect) still show up on the page as "deleted" placeholders.
+setInterval(() => markDeletedOnPage(), 10 * 60_000);
 
 // Self-test every minute; if the Mac was asleep (the timer jumped), test immediately.
 let lastTick = Date.now();
