@@ -55,6 +55,7 @@ export const config = {
 
 /** includeGroups: the dashboard chat list shows groups even when IGNORE_GROUPS keeps them out of appointment scanning. */
 export function chatAllowed(chat, { includeGroups = false } = {}) {
+  if (chat.id?._serialized === "status@broadcast") return false; // other people's Status posts, not a chat
   if (config.ignoreGroups && chat.isGroup && !includeGroups) return false;
   const name = (chat.name || "").toLowerCase();
   const id = chat.id?.user || "";
