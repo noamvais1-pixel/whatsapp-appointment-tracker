@@ -5,13 +5,16 @@
  * changes - those are never overwritten.
  */
 import { execFile, spawn } from "node:child_process";
+import path from "node:path";
 import { ROOT, config } from "./config.js";
 import { state } from "./whatsapp.js";
 import { busy } from "./processor.js";
 
+// Started from the Desktop app, PATH has no /opt/homebrew/bin, so npm (which sits next to node) is not found
+const PATH = [path.dirname(process.execPath), process.env.PATH].filter(Boolean).join(":");
 const run = (cmd, args, timeout = 120000) =>
   new Promise((resolve, reject) =>
-    execFile(cmd, args, { cwd: ROOT, timeout, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } }, (err, stdout, stderr) =>
+    execFile(cmd, args, { cwd: ROOT, timeout, env: { ...process.env, PATH, GIT_TERMINAL_PROMPT: "0" } }, (err, stdout, stderr) =>
       err ? reject(new Error((stderr || err.message).trim().split("\n").pop())) : resolve(stdout.trim()),
     ),
   );
@@ -27,6 +30,7 @@ export const updState = {
 };
 
 let running = false;
+let bootCommit = null; // the version this process is running; an update that was pulled but never restarted differs
 
 /** Check GitHub; apply the update when there is one and it is safe to restart. */
 export async function checkForUpdates({ apply = true } = {}) {
@@ -35,11 +39,13 @@ export async function checkForUpdates({ apply = true } = {}) {
   try {
     updState.lastCheckAt = Date.now();
     updState.current = await run("git", ["rev-parse", "--short", "HEAD"]);
+    bootCommit ??= updState.current;
     await run("git", ["fetch", "--quiet", "origin", "main"], 90000);
     const remote = await run("git", ["rev-parse", "--short", "origin/main"]);
     const behind = Number(await run("git", ["rev-list", "--count", "HEAD..origin/main"]));
     updState.available = behind > 0 ? remote : null;
-    if (behind === 0) { updState.lastResult = "up-to-date"; updState.lastError = null; return updState; }
+    const pulledEarlier = behind === 0 && updState.current !== bootCommit;
+    if (behind === 0 && !pulledEarlier) { updState.lastResult = "up-to-date"; updState.lastError = null; return updState; }
 
     const dirty = await run("git", ["status", "--porcelain", "--untracked-files=no"]);
     if (dirty) {
@@ -57,7 +63,7 @@ export async function checkForUpdates({ apply = true } = {}) {
     }
 
     console.log(`[update] updating ${updState.current} -> ${remote}`);
-    await run("git", ["pull", "--ff-only", "--quiet", "origin", "main"], 120000);
+    if (!pulledEarlier) await run("git", ["pull", "--ff-only", "--quiet", "origin", "main"], 120000);
     await run("npm", ["install", "--no-audit", "--no-fund", "--loglevel=error"], 600000);
     updState.lastResult = "updated";
     updState.updatedAt = Date.now();
@@ -79,6 +85,7 @@ export async function checkForUpdates({ apply = true } = {}) {
 
 export function startUpdater() {
   if (!updState.enabled) return;
+  run("git", ["rev-parse", "--short", "HEAD"]).then((c) => (bootCommit ??= c), () => {});
   setTimeout(() => checkForUpdates(), 3 * 60_000);                  // shortly after start
   setInterval(() => checkForUpdates(), config.autoUpdateHours * 3600_000);
 }
