@@ -2,7 +2,7 @@ import express from "express";
 import { config, ROOT } from "./config.js";
 import { installAuth, authEnabled } from "./auth.js";
 import * as store from "./db.js";
-import { state, relink, runBackfill, listChats, phoneFor, resolvePhones } from "./whatsapp.js";
+import { state, relink, runBackfill, listChats, phoneFor, resolvePhones, editMessage, deleteMessage } from "./whatsapp.js";
 import { buildDigest, localDateKey } from "./digest.js";
 import { summary } from "./status.js";
 import { syncCalendar, calState, inCalendar } from "./calendar.js";
@@ -266,6 +266,19 @@ export function startServer(getClient) {
     }
   });
 
+  // Edit or delete a message from the chat panel; both change it on the other person's phone too
+  // (except "delete for me", which removes it only from this account's own devices and from this app).
+  app.post("/api/messages/:id/edit", async (req, res) => {
+    const text = String(req.body?.text || "").trim();
+    if (!text) return res.status(400).json({ error: "empty message" });
+    try { await editMessage(req.params.id, text); res.json({ ok: true }); }
+    catch (e) { res.status(e.code || 500).json({ error: String(e.message).slice(0, 200) }); }
+  });
+  app.post("/api/messages/:id/delete", async (req, res) => {
+    try { await deleteMessage(req.params.id, !!req.body?.everyone); res.json({ ok: true }); }
+    catch (e) { res.status(e.code || 500).json({ error: String(e.message).slice(0, 200) }); }
+  });
+
   // Disconnect the current phone and show a QR code for another one.
   app.post("/api/unlink", async (req, res) => {
     const clearData = !!req.body?.clearData;
@@ -428,6 +441,8 @@ const PAGE = /* html */ `<!doctype html>
      Not on text boxes: there WebKit leaves the cursor at the left edge while English is typed (setDir handles them) */
   .b .tx{unicode-bidi:plaintext;text-align:start}
   .b.hl{outline:2px solid var(--accent)}
+  .b{position:relative;padding-inline-end:28px}.b .mact{position:absolute;top:2px;inset-inline-end:4px;padding:0 7px;font-size:14px;line-height:18px;opacity:0;background:rgba(255,255,255,.85)}.b:hover .mact{opacity:1}
+  .mmenu{position:fixed;z-index:50;display:flex;flex-direction:column;gap:2px;padding:6px;border-radius:14px;background:rgba(255,255,255,.95);box-shadow:var(--shadow);border:1px solid rgba(0,0,0,.08)}.mmenu button{text-align:start;border-radius:9px}
   .b.del{border-color:rgba(180,71,29,.45)}.b .flag{display:block;font-size:11px;color:var(--warn);margin-top:3px}.b .flag.ed{color:var(--muted);cursor:help}
   .compose{display:flex;gap:8px;padding:10px 12px;border-top:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.25)}.compose textarea{flex:1;resize:none;height:44px}
   .sent{font-size:12px;color:var(--accent);padding:0 14px 8px}
@@ -459,7 +474,7 @@ const PAGE = /* html */ `<!doctype html>
     :root{--ink:#f1f2f6;--muted:#a7acb8;--line:rgba(255,255,255,.14);--glass:rgba(30,34,44,.55);--glass2:rgba(30,34,44,.4);--glass-strong:rgba(50,55,68,.7);--accent:#3ed48c;--accent2:#1b7a4a;--warn:#ff9a7a;--shadow:0 12px 32px rgba(0,0,0,.35),0 1px 0 rgba(255,255,255,.08) inset}
     body{background:#171a22;background-image:radial-gradient(900px 600px at 85% -10%,rgba(60,120,220,.45),transparent 60%),radial-gradient(700px 500px at -10% 30%,rgba(40,170,130,.35),transparent 60%),radial-gradient(800px 600px at 60% 110%,rgba(140,90,220,.35),transparent 60%)}
     .pill{background:rgba(62,212,140,.16)}.views button.on,nav button.on{background:#fff;color:#111;border-color:#fff}
-    .b{background:rgba(60,66,80,.8);border-color:rgba(255,255,255,.1)}.b.me{background:rgba(35,110,70,.7)}.mph .lbl,.mph .dl{color:#111}
+    .b{background:rgba(60,66,80,.8);border-color:rgba(255,255,255,.1)}.b.me{background:rgba(35,110,70,.7)}.mmenu{background:rgba(40,44,56,.96);border-color:rgba(255,255,255,.12)}.b .mact{background:rgba(40,44,56,.85)}.mph .lbl,.mph .dl{color:#111}
     .strip.ok{background:rgba(40,170,110,.25)}.strip.warn{background:rgba(200,150,30,.25)}.strip.bad{background:rgba(200,80,50,.3)}
     .alert{background:rgba(200,80,50,.3);color:#ffd9cc}.alert.soft{background:rgba(200,150,30,.28);color:#ffe9b0}.qr img{background:#fff}
   }
@@ -679,6 +694,25 @@ async function showChat(c){ cur=c; const panel=document.getElementById('panel');
   if(isChatView(view)&&panel.parentElement===document.body){ const slot=document.getElementById('cslot'); if(slot) slot.replaceWith(panel); }
   document.getElementById('pname-t').textContent=cur.name; document.getElementById('pphone').textContent=''; document.getElementById('pmsgs').innerHTML='<div class="stat">טוען…</div>';
   panel.classList.add('open'); await loadChat(true); clearInterval(ptimer); ptimer=setInterval(()=>loadChat(false),8000); document.getElementById('ptext').focus(); }
+// edit / delete menu on a message bubble
+let pmsgs={};
+function msgMenu(e){ e.stopPropagation(); const id=e.target.closest('.b').dataset.id, m=pmsgs[id]; if(!m) return; closeMsgMenu();
+  const age=Date.now()/1000-m.ts, opts=[];
+  if(m.from_me&&!m.deleted_at&&!m.media_type&&age<15*60) opts.push(['✏️ עריכה',()=>editMsg(m)]);
+  if(m.from_me&&!m.deleted_at&&age<60*3600) opts.push(['🗑 מחיקה אצל כולם',()=>delMsg(m,true)]);
+  opts.push(['מחיקה רק אצלי',()=>delMsg(m,false)]);
+  const menu=document.createElement('div'); menu.id='mmenu'; menu.className='mmenu';
+  for(const [label,fn] of opts){ const b=document.createElement('button'); b.textContent=label; b.onclick=()=>{ closeMsgMenu(); fn(); }; menu.appendChild(b); }
+  document.body.appendChild(menu); const r=e.target.getBoundingClientRect();
+  menu.style.top=Math.min(r.bottom+4,innerHeight-menu.offsetHeight-8)+'px'; menu.style.left=Math.max(8,Math.min(r.left,innerWidth-menu.offsetWidth-8))+'px'; }
+function closeMsgMenu(){ document.getElementById('mmenu')?.remove(); }
+document.addEventListener('click',closeMsgMenu);
+async function msgAction(m,what,body,failMsg){ let r,j; try{ r=await fetch('/api/messages/'+encodeURIComponent(m.id)+'/'+what,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}); j=await r.json().catch(()=>({})); }catch{ alert('אין תשובה מהתוכנה'); return; }
+  if(!r.ok) alert(r.status===409&&/too late/.test(j.error||'')?failMsg:r.status===409?'WhatsApp לא מחובר כרגע':'זה לא הצליח: '+(j.error||r.status)); loadChat(false); }
+function editMsg(m){ const v=prompt('עריכת ההודעה (תשתנה גם בטלפון של מי שקיבל אותה):',m.body); if(v==null||!v.trim()||v.trim()===m.body) return;
+  msgAction(m,'edit',{text:v.trim()},'WhatsApp מאפשר לערוך הודעה רק ב-15 הדקות הראשונות אחרי השליחה.'); }
+function delMsg(m,everyone){ if(!confirm(everyone?'למחוק את ההודעה אצל כולם? היא תימחק גם מהטלפון של מי שקיבל אותה. (כאן היא תישאר מסומנת כמחוקה)':'למחוק את ההודעה רק אצלך? אצל הצד השני היא תישאר.')) return;
+  msgAction(m,'delete',{everyone},'WhatsApp מאפשר למחוק אצל כולם רק בערך יומיים אחרי השליחה. אפשר עדיין למחוק רק אצלך.'); }
 function closeChat(){ cancelRec(); document.getElementById('panel').classList.remove('open'); clearInterval(ptimer); cur=null; }
 setView(view);
 async function loadChat(scroll){ if(!cur) return; const id=cur.chatId; let d; try{ d=await (await fetch('/api/chats/'+encodeURIComponent(id)+'/messages')).json(); }catch{ return; } if(!cur||cur.chatId!==id) return;
@@ -686,10 +720,11 @@ async function loadChat(scroll){ if(!cur) return; const id=cur.chatId; let d; tr
   const box=document.getElementById('pmsgs'); const atBottom=box.scrollHeight-box.scrollTop-box.clientHeight<40;
   // never rebuild the list while a voice note or video is playing (it would restart it), and only rebuild when something changed
   if([...box.querySelectorAll('audio,video')].some(el=>!el.paused&&!el.ended)) return;
-  const sig=d.messages.map(m=>m.id+':'+(m.media_status||'')).join('|');
+  const sig=d.messages.map(m=>m.id+':'+(m.media_status||'')+':'+(m.deleted_at||'')+':'+m.body).join('|');
   if(!scroll&&sig===box.dataset.sig) return;
   box.dataset.sig=sig;
-  box.innerHTML=d.messages.map(m=>'<div class="b '+(m.from_me?'me':'')+(m.id===cur.msgId?' hl':'')+(m.deleted_at?' del':'')+'">'+mediaHtml(m)+(bodyText(m)?'<div class="tx">'+esc(bodyText(m))+'</div>':'')+(m.deleted_at?'<span class="flag">🚫 '+(m.from_me?'מחקת את ההודעה הזאת':'נמחקה על ידי השולח')+(m.deleted_at==='unknown'?'':' · '+esc(new Date(m.deleted_at.replace(' ','T')+'Z').toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})))+' · הטקסט נשמר כאן</span>':'')+(m.edited_from?'<span class="flag ed" title="'+esc('לפני העריכה: '+m.edited_from)+'">✏️ נערכה (להצגת המקור: לרחף)</span>':'')+'<span class="t">'+(m.from_me?'':esc(m.sender||'')+' · ')+new Date(m.ts*1000).toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+'</span></div>').join('')||'<div class="stat">עדיין אין הודעות שמורות לצ\\'אט הזה.</div>';
+  pmsgs={}; for(const m of d.messages) pmsgs[m.id]=m;
+  box.innerHTML=d.messages.map(m=>'<div class="b '+(m.from_me?'me':'')+(m.id===cur.msgId?' hl':'')+(m.deleted_at?' del':'')+'" data-id="'+esc(m.id)+'"><button class="mact" onclick="msgMenu(event)" title="עריכה או מחיקה">⋯</button>'+mediaHtml(m)+(bodyText(m)?'<div class="tx">'+esc(bodyText(m))+'</div>':'')+(m.deleted_at?'<span class="flag">🚫 '+(m.from_me?'מחקת את ההודעה הזאת':'נמחקה על ידי השולח')+(m.deleted_at==='unknown'?'':' · '+esc(new Date(m.deleted_at.replace(' ','T')+'Z').toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})))+' · הטקסט נשמר כאן</span>':'')+(m.edited_from?'<span class="flag ed" title="'+esc('לפני העריכה: '+m.edited_from)+'">✏️ נערכה (להצגת המקור: לרחף)</span>':'')+'<span class="t">'+(m.from_me?'':esc(m.sender||'')+' · ')+new Date(m.ts*1000).toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+'</span></div>').join('')||'<div class="stat">עדיין אין הודעות שמורות לצ\\'אט הזה.</div>';
   if(scroll||atBottom) box.scrollTop=box.scrollHeight; }
 function fmtSize(n){ if(!n) return ''; return n>1048576?(n/1048576).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB'; }
 function bodyText(m){ if(m.media_type&&m.media_type!=='sticker'&&m.body&&m.body.startsWith('[')){ const i=m.body.indexOf(']'); return i>0?m.body.slice(i+1).trim():''; } return m.body||''; }

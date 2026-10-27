@@ -92,6 +92,8 @@ const stmts = {
   // found already deleted on the page (e.g. deleted while the tracker was off): when it happened is not known
   markDeletedEarlier: db.prepare(`UPDATE messages SET deleted_at = 'unknown' WHERE id = ? AND deleted_at IS NULL`),
   markEdited: db.prepare(`UPDATE messages SET edited_from = COALESCE(edited_from, ?), body = ? WHERE id = ?`),
+  getMessage: db.prepare(`SELECT * FROM messages WHERE id = ?`),
+  forgetMessage: db.prepare(`DELETE FROM messages WHERE id = ?`),
   recentMessages: db.prepare(
     `SELECT m.*, md.status AS media_status, md.mimetype AS media_mime, md.filename AS media_filename, md.size AS media_size, md.error AS media_error, (md.thumb IS NOT NULL) AS media_thumb
        FROM messages m LEFT JOIN media md ON md.msg_id = m.id WHERE m.chat_id = ? ORDER BY m.ts DESC LIMIT ?`,
@@ -180,6 +182,9 @@ export function saveMessage(m, processed = 0) {
 export const markDeleted = (id) => stmts.markDeleted.run(id).changes;
 export const markDeletedEarlier = (id) => stmts.markDeletedEarlier.run(id).changes;
 export const markEdited = (id, newBody, prevBody) => stmts.markEdited.run(prevBody, newBody, id).changes;
+export const getMessage = (id) => stmts.getMessage.get(id);
+// "Delete for me" from the dashboard: the user wants it gone, so unlike deletions by others nothing is kept
+export const forgetMessage = (id) => { stmts.deleteMedia.run(id); return stmts.forgetMessage.run(id).changes; };
 export const getMedia = (id) => stmts.getMedia.get(id);
 export const saveMedia = (r) => stmts.saveMedia.run(r.msg_id, r.status, r.mimetype ?? null, r.filename ?? null, r.path ?? null, r.size ?? null, r.error ?? null);
 export const deleteMedia = (id) => stmts.deleteMedia.run(id);

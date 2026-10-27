@@ -541,3 +541,39 @@ export async function sendToSelf(client, text) {
   if (!me) throw new Error("not linked");
   await client.sendMessage(me, text);
 }
+
+// Editing and deleting from the dashboard. WhatsApp allows editing only your own text messages (about 15 minutes
+// after sending) and deleting for everyone only your own messages (about 2 days); msg.delete(true) quietly deletes
+// just for you when that has passed, so the permission is asked from WhatsApp Web first.
+async function ownMessage(id) {
+  if (!current || state.status !== "ready") throw Object.assign(new Error("WhatsApp not linked"), { code: 409 });
+  const msg = await current.getMessageById(id).catch(() => null);
+  if (!msg) throw Object.assign(new Error("message not found in WhatsApp"), { code: 404 });
+  return msg;
+}
+export async function editMessage(id, text) {
+  const msg = await ownMessage(id);
+  if (!msg.fromMe) throw Object.assign(new Error("not your message"), { code: 403 });
+  const before = msg.body;
+  if (!(await msg.edit(text))) throw Object.assign(new Error("too late to edit"), { code: 409 });
+  store.markEdited(id, text, before);
+}
+export async function deleteMessage(id, everyone) {
+  const msg = await ownMessage(id);
+  if (everyone) {
+    const can = await current.pupPage.evaluate(async (id) => {
+      const C = window.require("WAWebCollections");
+      const m = C.Msg.get(id) || (await C.Msg.getMessagesById([id]))?.messages?.[0];
+      return !!m && window.require("WAWebMsgActionCapability").canSenderRevokeMsg(m);
+    }, id);
+    if (!can) throw Object.assign(new Error("too late to delete for everyone"), { code: 409 });
+    await msg.delete(true);
+    store.markDeleted(id); // the original text stays visible here, as for messages others delete
+  } else {
+    await msg.delete(false);
+    const media = store.getMedia(id);
+    if (media?.path) fs.rmSync(media.path, { force: true });
+    if (media?.thumb) fs.rmSync(media.thumb, { force: true });
+    store.forgetMessage(id);
+  }
+}
