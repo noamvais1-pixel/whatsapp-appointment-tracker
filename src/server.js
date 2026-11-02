@@ -454,7 +454,7 @@ const PAGE = /* html */ `<!doctype html>
   .spell button{padding:3px 10px;font-size:12.5px}.spell button.ok{color:var(--muted)}
   #nspell{padding:0 4px;margin:-8px 0 14px}
   .b .q{display:block;margin:0 0 4px;padding:4px 8px;border-inline-start:3px solid var(--accent);border-radius:8px;background:rgba(0,0,0,.05);font-size:12px;color:var(--muted);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;unicode-bidi:plaintext}.b .q b{display:block;color:var(--accent);font-weight:600}
-  .replybar{display:flex;align-items:center;gap:10px;margin:8px 12px 0;padding:6px 10px;border-inline-start:3px solid var(--accent);border-radius:10px;background:rgba(0,0,0,.05);font-size:13px}.replybar .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.replybar .x{cursor:pointer}
+  .replybar{display:flex;align-items:center;gap:10px;margin:8px 12px 0;padding:6px 10px;border-inline-start:3px solid var(--accent);border-radius:10px;background:rgba(0,0,0,.05);font-size:13px}.replybar .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.replybar .x{cursor:pointer}.replybar[hidden]{display:none}
   .attach{display:flex;align-items:center;gap:10px;padding:8px 12px 0;font-size:13px}.attach img{max-height:120px;max-width:180px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:#fff}
   .attach .big{font-size:34px;width:56px;height:56px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:rgba(255,255,255,.7)}
   .attach .nm{display:flex;flex-direction:column;gap:2px}
