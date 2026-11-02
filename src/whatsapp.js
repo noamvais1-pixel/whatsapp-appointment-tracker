@@ -249,6 +249,15 @@ function createClient({ onReady } = {}) {
   client.on("disconnected", (r) => {
     if (current && current !== client) return; // an old client going away during a phone switch
     state.status = "disconnected"; state.lastError = String(r); console.error("[whatsapp] disconnected:", r);
+    // After a LOGOUT the library re-injects into the same page, which breaks it: the page keeps
+    // spinning and the QR codes it hands out can't be scanned. The "qr" event that follows also
+    // hides the drop from the watchdog, so start over in a fresh browser right away (2026-11-02).
+    if (String(r) === "LOGOUT" && !client._reconnecting) {
+      client._reconnecting = true;
+      setTimeout(() => {
+        if (current === client) hardReconnect("logged out").catch((e) => console.error("[whatsapp] reconnect failed:", e.message));
+      }, 3000);
+    }
   });
 
   client.on("ready", async () => {
