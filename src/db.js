@@ -63,7 +63,8 @@ if (!db.prepare("PRAGMA table_info(media)").all().some((c) => c.name === "thumb"
   db.exec("ALTER TABLE media ADD COLUMN thumb TEXT"); // Quick Look preview of a downloaded document/video
 }
 // Deleted-for-everyone and edited messages keep their original text; these columns record what happened.
-for (const col of ["deleted_at TEXT", "edited_from TEXT"]) {
+// A reply (תגובה) keeps the quoted message's id within its chat (WhatsApp's stanza id) and its text as WhatsApp showed it.
+for (const col of ["deleted_at TEXT", "edited_from TEXT", "quoted_stanza TEXT", "quoted_body TEXT"]) {
   const name = col.split(" ")[0];
   if (!db.prepare("PRAGMA table_info(messages)").all().some((c) => c.name === name)) db.exec(`ALTER TABLE messages ADD COLUMN ${col}`);
 }
@@ -88,6 +89,7 @@ const stmts = {
     `INSERT OR IGNORE INTO messages (id, chat_id, chat_name, from_me, sender, body, ts, processed, media_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ),
   setMediaType: db.prepare(`UPDATE messages SET media_type = ? WHERE id = ? AND media_type IS NULL`),
+  setQuote: db.prepare(`UPDATE messages SET quoted_stanza = ?, quoted_body = ? WHERE id = ? AND quoted_body IS NULL`),
   markDeleted: db.prepare(`UPDATE messages SET deleted_at = datetime('now') WHERE id = ? AND deleted_at IS NULL`),
   // found already deleted on the page (e.g. deleted while the tracker was off): when it happened is not known
   markDeletedEarlier: db.prepare(`UPDATE messages SET deleted_at = 'unknown' WHERE id = ? AND deleted_at IS NULL`),
@@ -177,6 +179,7 @@ const stmts = {
 export function saveMessage(m, processed = 0) {
   const r = stmts.insertMsg.run(m.id, m.chatId, m.chatName, m.fromMe ? 1 : 0, m.sender, m.body, m.ts, processed, m.mediaType ?? null);
   if (r.changes === 0 && m.mediaType) stmts.setMediaType.run(m.mediaType, m.id); // older rows saved before media support
+  if (m.quote) stmts.setQuote.run(m.quote.stanza, m.quote.body, m.id); // new rows, and older ones saved before replies were kept
   return r.changes > 0;
 }
 export const markDeleted = (id) => stmts.markDeleted.run(id).changes;

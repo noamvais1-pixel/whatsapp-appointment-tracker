@@ -90,6 +90,12 @@ function messageText(msg) {
   if (msg.type === "vcard") return "[shared a contact]";
   return null; // reactions, call logs, etc.
 }
+// The message a reply quotes, as WhatsApp ships it with the reply (an image's body there is its thumbnail, so use the caption)
+function quoteOf(msg) {
+  const q = msg._data?.quotedMsg;
+  if (!msg.hasQuotedMsg || !q) return null;
+  return { stanza: msg._data.quotedStanzaID || null, body: messageText({ type: q.type, body: q.type === "chat" ? q.body : q.caption || "", _data: q }) || "הודעה" };
+}
 /** Save a message record plus its preview thumbnail (if any). Returns true when the message is new. */
 export function storeRecord(rec, processed = 0) {
   const isNew = store.saveMessage(rec, processed);
@@ -118,6 +124,7 @@ export function toRecord(msg, chat) {
     body,
     ts: msg.timestamp,
     mediaType: mediaKind(msg),
+    quote: quoteOf(msg),
     // for images/videos WhatsApp ships a tiny base64 JPEG preview in the raw body
     thumb: ["image", "video"].includes(msg.type) && typeof msg._data?.body === "string" && msg._data.body.length > 200 && !/\s/.test(msg._data.body) ? msg._data.body : null,
   };

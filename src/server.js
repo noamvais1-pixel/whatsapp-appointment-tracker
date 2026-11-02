@@ -126,7 +126,7 @@ export function startServer(getClient) {
 
   // Send an image or a file through the linked account. Body: { name, mimetype, data (base64), caption, asDocument }
   app.post("/api/chats/:chatId/send-file", async (req, res) => {
-    const { name, mimetype, data, caption = "", asDocument = false } = req.body || {};
+    const { name, mimetype, data, caption = "", asDocument = false, replyTo } = req.body || {};
     if (!data || !mimetype) return res.status(400).json({ error: "missing file" });
     if (Buffer.byteLength(data, "base64") > 45 * 1024 * 1024) return res.status(413).json({ error: "הקובץ גדול מ-45MB" });
     const client = getClient?.();
@@ -134,7 +134,7 @@ export function startServer(getClient) {
     try {
       const media = new MessageMedia(mimetype, data, name || "file");
       const isImage = /^image\/(jpeg|png|webp|gif)$/.test(mimetype) && !asDocument;
-      await client.sendMessage(req.params.chatId, media, { caption: caption || undefined, sendMediaAsDocument: !isImage });
+      await client.sendMessage(req.params.chatId, media, { caption: caption || undefined, sendMediaAsDocument: !isImage, quotedMessageId: replyTo || undefined });
       store.closeNoReply(req.params.chatId, "you sent a file from the dashboard");
       console.log(`[send] ${isImage ? "image" : "file"} "${name}" -> ${req.params.chatId}`);
       res.json({ ok: true });
@@ -146,7 +146,7 @@ export function startServer(getClient) {
   // Send a recording from the dashboard microphone as a WhatsApp voice note. Body: { mimetype, data (base64) }
   // Browsers record webm/mp4; WhatsApp phones only play voice notes in Ogg/Opus, so convert with ffmpeg first.
   app.post("/api/chats/:chatId/send-voice", async (req, res) => {
-    const { mimetype = "", data } = req.body || {};
+    const { mimetype = "", data, replyTo } = req.body || {};
     if (!data) return res.status(400).json({ error: "missing recording" });
     const client = getClient?.();
     if (!client || state.status !== "ready") return res.status(409).json({ error: "WhatsApp not linked" });
@@ -158,7 +158,7 @@ export function startServer(getClient) {
       fs.writeFileSync(`${tmp}.${ext}`, Buffer.from(data, "base64"));
       await new Promise((ok, fail) => execFile(ff, ["-y", "-loglevel", "error", "-i", `${tmp}.${ext}`, "-vn", "-ac", "1", "-ar", "48000", "-c:a", "libopus", "-b:a", "32k", `${tmp}.ogg`], (e) => (e ? fail(e) : ok())));
       const media = new MessageMedia("audio/ogg; codecs=opus", fs.readFileSync(`${tmp}.ogg`).toString("base64"), "voice.ogg");
-      await client.sendMessage(req.params.chatId, media, { sendAudioAsVoice: true });
+      await client.sendMessage(req.params.chatId, media, { sendAudioAsVoice: true, quotedMessageId: replyTo || undefined });
       store.closeNoReply(req.params.chatId, "you sent a voice note from the dashboard");
       console.log(`[send] voice note -> ${req.params.chatId}`);
       res.json({ ok: true });
@@ -258,7 +258,8 @@ export function startServer(getClient) {
     const client = getClient?.();
     if (!client || state.status !== "ready") return res.status(409).json({ error: "WhatsApp not linked" });
     try {
-      await client.sendMessage(req.params.chatId, text);
+      // replyTo: the id of the message this one answers (תגובה), shown quoted above it on both phones
+      await client.sendMessage(req.params.chatId, text, { quotedMessageId: req.body?.replyTo || undefined });
       store.closeNoReply(req.params.chatId, "you followed up from the dashboard");
       res.json({ ok: true });
     } catch (e) {
@@ -452,6 +453,8 @@ const PAGE = /* html */ `<!doctype html>
   .spell .bad{font-weight:600;text-decoration:underline wavy #e5484d;text-underline-offset:3px}
   .spell button{padding:3px 10px;font-size:12.5px}.spell button.ok{color:var(--muted)}
   #nspell{padding:0 4px;margin:-8px 0 14px}
+  .b .q{display:block;margin:0 0 4px;padding:4px 8px;border-inline-start:3px solid var(--accent);border-radius:8px;background:rgba(0,0,0,.05);font-size:12px;color:var(--muted);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;unicode-bidi:plaintext}.b .q b{display:block;color:var(--accent);font-weight:600}
+  .replybar{display:flex;align-items:center;gap:10px;margin:8px 12px 0;padding:6px 10px;border-inline-start:3px solid var(--accent);border-radius:10px;background:rgba(0,0,0,.05);font-size:13px}.replybar .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.replybar .x{cursor:pointer}
   .attach{display:flex;align-items:center;gap:10px;padding:8px 12px 0;font-size:13px}.attach img{max-height:120px;max-width:180px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:#fff}
   .attach .big{font-size:34px;width:56px;height:56px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:rgba(255,255,255,.7)}
   .attach .nm{display:flex;flex-direction:column;gap:2px}
@@ -474,7 +477,7 @@ const PAGE = /* html */ `<!doctype html>
     :root{--ink:#f1f2f6;--muted:#a7acb8;--line:rgba(255,255,255,.14);--glass:rgba(30,34,44,.55);--glass2:rgba(30,34,44,.4);--glass-strong:rgba(50,55,68,.7);--accent:#3ed48c;--accent2:#1b7a4a;--warn:#ff9a7a;--shadow:0 12px 32px rgba(0,0,0,.35),0 1px 0 rgba(255,255,255,.08) inset}
     body{background:#171a22;background-image:radial-gradient(900px 600px at 85% -10%,rgba(60,120,220,.45),transparent 60%),radial-gradient(700px 500px at -10% 30%,rgba(40,170,130,.35),transparent 60%),radial-gradient(800px 600px at 60% 110%,rgba(140,90,220,.35),transparent 60%)}
     .pill{background:rgba(62,212,140,.16)}.views button.on,nav button.on{background:#fff;color:#111;border-color:#fff}
-    .b{background:rgba(60,66,80,.8);border-color:rgba(255,255,255,.1)}.b.me{background:rgba(35,110,70,.7)}.mmenu{background:rgba(40,44,56,.96);border-color:rgba(255,255,255,.12)}.b .mact{background:rgba(40,44,56,.85)}.mph .lbl,.mph .dl{color:#111}
+    .b{background:rgba(60,66,80,.8);border-color:rgba(255,255,255,.1)}.b.me{background:rgba(35,110,70,.7)}.b .q,.replybar{background:rgba(255,255,255,.08)}.mmenu{background:rgba(40,44,56,.96);border-color:rgba(255,255,255,.12)}.b .mact{background:rgba(40,44,56,.85)}.mph .lbl,.mph .dl{color:#111}
     .strip.ok{background:rgba(40,170,110,.25)}.strip.warn{background:rgba(200,150,30,.25)}.strip.bad{background:rgba(200,80,50,.3)}
     .alert{background:rgba(200,80,50,.3);color:#ffd9cc}.alert.soft{background:rgba(200,150,30,.28);color:#ffe9b0}.qr img{background:#fff}
   }
@@ -588,7 +591,7 @@ const PAGE = /* html */ `<!doctype html>
 </main>
 <div id="panel"><div class="ph"><b id="pname"><span id="pname-t"></span><span class="pn" id="pphone"></span></b><span id="pstatus" class="stat"></span><button onclick="closeChat()">סגירה</button></div>
 <div class="msgs" id="pmsgs"></div><div class="sent" id="psent"></div>
-<div class="attach" id="pattach" hidden></div>
+<div class="replybar" id="preply" hidden></div><div class="attach" id="pattach" hidden></div>
 <div class="spell" id="pspell" hidden></div>
 <div class="compose"><button class="clip" title="לצרף תמונה או קובץ" onclick="document.getElementById('pfile').click()">📎</button><input type="file" id="pfile" hidden onchange="pickFile(this.files[0]); this.value=''"><button class="clip" id="pmic" title="להקליט הודעה קולית" onclick="toggleRec()">🎤</button><textarea id="ptext" spellcheck="true" placeholder="לכתוב הודעה… (Enter לשליחה, Shift+Enter לשורה חדשה)"></textarea><button class="primary" onclick="sendMsg()">שליחה</button></div></div>
 <script>
@@ -690,7 +693,7 @@ async function startChatByNumber(num){ let r, j; try{ r=await fetch('/api/chats/
 async function openChatById(chatId){ const c=chats.find(x=>x.id===chatId); await showChat({chatId, name:c?c.name:chatId, msgId:null}); renderChats(); }
 async function openChat(itemId){ const it=S.items.find(i=>i.id===itemId); if(!it||!it.chat_id){ alert('הפריט הזה לא מקושר לצ\\'אט.'); return; }
   await showChat({chatId:it.chat_id,name:it.chat_name||it.who||it.chat_id,msgId:it.source_msg_id}); }
-async function showChat(c){ cur=c; const panel=document.getElementById('panel');
+async function showChat(c){ if(cur?.chatId!==c.chatId) clearReply(); cur=c; const panel=document.getElementById('panel');
   if(isChatView(view)&&panel.parentElement===document.body){ const slot=document.getElementById('cslot'); if(slot) slot.replaceWith(panel); }
   document.getElementById('pname-t').textContent=cur.name; document.getElementById('pphone').textContent=''; document.getElementById('pmsgs').innerHTML='<div class="stat">טוען…</div>';
   panel.classList.add('open'); await loadChat(true); clearInterval(ptimer); ptimer=setInterval(()=>loadChat(false),8000); document.getElementById('ptext').focus(); }
@@ -698,6 +701,7 @@ async function showChat(c){ cur=c; const panel=document.getElementById('panel');
 let pmsgs={};
 function msgMenu(e){ e.stopPropagation(); const id=e.target.closest('.b').dataset.id, m=pmsgs[id]; if(!m) return; closeMsgMenu();
   const age=Date.now()/1000-m.ts, opts=[];
+  if(!m.deleted_at) opts.push(['↩️ תגובה',()=>replyMsg(m)]);
   if(m.from_me&&!m.deleted_at&&!m.media_type&&age<15*60) opts.push(['✏️ עריכה',()=>editMsg(m)]);
   if(m.from_me&&!m.deleted_at&&age<60*3600) opts.push(['🗑 מחיקה אצל כולם',()=>delMsg(m,true)]);
   opts.push(['מחיקה רק אצלי',()=>delMsg(m,false)]);
@@ -705,6 +709,18 @@ function msgMenu(e){ e.stopPropagation(); const id=e.target.closest('.b').datase
   for(const [label,fn] of opts){ const b=document.createElement('button'); b.textContent=label; b.onclick=()=>{ closeMsgMenu(); fn(); }; menu.appendChild(b); }
   document.body.appendChild(menu); const r=e.target.getBoundingClientRect();
   menu.style.top=Math.min(r.bottom+4,innerHeight-menu.offsetHeight-8)+'px'; menu.style.left=Math.max(8,Math.min(r.left,innerWidth-menu.offsetWidth-8))+'px'; }
+// reply (תגובה): the next message sent quotes this one, as in WhatsApp
+let replyTo=null;
+const msgSnippet=t=>t.length>90?t.slice(0,90)+'…':t;
+function whoSent(m){ return m.from_me?'אני':(m.sender||''); }
+function replyMsg(m){ replyTo=m; renderReply(); document.getElementById('ptext').focus(); }
+function renderReply(){ const a=document.getElementById('preply'); if(!replyTo){ a.hidden=true; a.innerHTML=''; return; }
+  a.hidden=false; a.innerHTML='<span>↩️</span><span class="nm"><b>תגובה ל'+esc(whoSent(replyTo))+':</b> '+esc(msgSnippet(replyTo.body))+'</span><span class="x" onclick="clearReply()" title="לבטל את התגובה">✕</span>'; }
+function clearReply(){ replyTo=null; renderReply(); }
+function quoteHtml(m,all){ if(!m.quoted_body) return ''; const src=m.quoted_stanza&&all.find(x=>x.id.endsWith('_'+m.quoted_stanza));
+  return '<span class="q"'+(m.quoted_stanza?' onclick="jumpToMsg(this)" data-stanza="'+esc(m.quoted_stanza)+'" title="מעבר להודעה המקורית"':'')+'>'+(src?'<b>'+esc(whoSent(src))+'</b>':'')+esc(msgSnippet(src?src.body:m.quoted_body||''))+'</span>'; }
+function jumpToMsg(el){ const s=el.dataset.stanza; const b=[...document.querySelectorAll('#pmsgs .b')].find(x=>x.dataset.id.endsWith('_'+s));
+  if(!b){ alert('ההודעה המקורית ישנה מדי ולא מוצגת כאן.'); return; } b.scrollIntoView({block:'center',behavior:'smooth'}); b.classList.add('hl'); setTimeout(()=>b.classList.remove('hl'),1600); }
 function closeMsgMenu(){ document.getElementById('mmenu')?.remove(); }
 document.addEventListener('click',closeMsgMenu);
 async function msgAction(m,what,body,failMsg){ let r,j; try{ r=await fetch('/api/messages/'+encodeURIComponent(m.id)+'/'+what,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}); j=await r.json().catch(()=>({})); }catch{ alert('אין תשובה מהתוכנה'); return; }
@@ -713,18 +729,18 @@ function editMsg(m){ const v=prompt('עריכת ההודעה (תשתנה גם ב
   msgAction(m,'edit',{text:v.trim()},'WhatsApp מאפשר לערוך הודעה רק ב-15 הדקות הראשונות אחרי השליחה.'); }
 function delMsg(m,everyone){ if(!confirm(everyone?'למחוק את ההודעה אצל כולם? היא תימחק גם מהטלפון של מי שקיבל אותה. (כאן היא תישאר מסומנת כמחוקה)':'למחוק את ההודעה רק אצלך? אצל הצד השני היא תישאר.')) return;
   msgAction(m,'delete',{everyone},'WhatsApp מאפשר למחוק אצל כולם רק בערך יומיים אחרי השליחה. אפשר עדיין למחוק רק אצלך.'); }
-function closeChat(){ cancelRec(); document.getElementById('panel').classList.remove('open'); clearInterval(ptimer); cur=null; }
+function closeChat(){ cancelRec(); clearReply(); document.getElementById('panel').classList.remove('open'); clearInterval(ptimer); cur=null; }
 setView(view);
 async function loadChat(scroll){ if(!cur) return; const id=cur.chatId; let d; try{ d=await (await fetch('/api/chats/'+encodeURIComponent(id)+'/messages')).json(); }catch{ return; } if(!cur||cur.chatId!==id) return;
   if(d.phone&&d.phone!==cur.name) document.getElementById('pphone').textContent=d.phone;
   const box=document.getElementById('pmsgs'); const atBottom=box.scrollHeight-box.scrollTop-box.clientHeight<40;
   // never rebuild the list while a voice note or video is playing (it would restart it), and only rebuild when something changed
   if([...box.querySelectorAll('audio,video')].some(el=>!el.paused&&!el.ended)) return;
-  const sig=d.messages.map(m=>m.id+':'+(m.media_status||'')+':'+(m.deleted_at||'')+':'+m.body).join('|');
+  const sig=d.messages.map(m=>m.id+':'+(m.quoted_body||'')+':'+(m.media_status||'')+':'+(m.deleted_at||'')+':'+m.body).join('|');
   if(!scroll&&sig===box.dataset.sig) return;
   box.dataset.sig=sig;
   pmsgs={}; for(const m of d.messages) pmsgs[m.id]=m;
-  box.innerHTML=d.messages.map(m=>'<div class="b '+(m.from_me?'me':'')+(m.id===cur.msgId?' hl':'')+(m.deleted_at?' del':'')+'" data-id="'+esc(m.id)+'"><button class="mact" onclick="msgMenu(event)" title="עריכה או מחיקה">⋯</button>'+mediaHtml(m)+(bodyText(m)?'<div class="tx">'+esc(bodyText(m))+'</div>':'')+(m.deleted_at?'<span class="flag">🚫 '+(m.from_me?'מחקת את ההודעה הזאת':'נמחקה על ידי השולח')+(m.deleted_at==='unknown'?'':' · '+esc(new Date(m.deleted_at.replace(' ','T')+'Z').toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})))+' · הטקסט נשמר כאן</span>':'')+(m.edited_from?'<span class="flag ed" title="'+esc('לפני העריכה: '+m.edited_from)+'">✏️ נערכה (להצגת המקור: לרחף)</span>':'')+'<span class="t">'+(m.from_me?'':esc(m.sender||'')+' · ')+new Date(m.ts*1000).toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+'</span></div>').join('')||'<div class="stat">עדיין אין הודעות שמורות לצ\\'אט הזה.</div>';
+  box.innerHTML=d.messages.map(m=>'<div class="b '+(m.from_me?'me':'')+(m.id===cur.msgId?' hl':'')+(m.deleted_at?' del':'')+'" data-id="'+esc(m.id)+'"><button class="mact" onclick="msgMenu(event)" title="תגובה, עריכה או מחיקה">⋯</button>'+quoteHtml(m,d.messages)+mediaHtml(m)+(bodyText(m)?'<div class="tx">'+esc(bodyText(m))+'</div>':'')+(m.deleted_at?'<span class="flag">🚫 '+(m.from_me?'מחקת את ההודעה הזאת':'נמחקה על ידי השולח')+(m.deleted_at==='unknown'?'':' · '+esc(new Date(m.deleted_at.replace(' ','T')+'Z').toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})))+' · הטקסט נשמר כאן</span>':'')+(m.edited_from?'<span class="flag ed" title="'+esc('לפני העריכה: '+m.edited_from)+'">✏️ נערכה (להצגת המקור: לרחף)</span>':'')+'<span class="t">'+(m.from_me?'':esc(m.sender||'')+' · ')+new Date(m.ts*1000).toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+'</span></div>').join('')||'<div class="stat">עדיין אין הודעות שמורות לצ\\'אט הזה.</div>';
   if(scroll||atBottom) box.scrollTop=box.scrollHeight; }
 function fmtSize(n){ if(!n) return ''; return n>1048576?(n/1048576).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB'; }
 function bodyText(m){ if(m.media_type&&m.media_type!=='sticker'&&m.body&&m.body.startsWith('[')){ const i=m.body.indexOf(']'); return i>0?m.body.slice(i+1).trim():''; } return m.body||''; }
@@ -782,19 +798,19 @@ async function toggleRec(){ if(rec){ stopRec(); return; } if(!cur) return;
 function stopRec(){ if(rec&&rec.mr.state!=='inactive') rec.mr.stop(); }
 function cancelRec(){ if(!rec) return; rec.cancelled=true; stopRec(); }
 async function sendMsg(){ if(!cur) return; const ta=document.getElementById('ptext'); const text=ta.value.trim();
-  if(rec) return;
+  if(rec) return; let rid=replyTo?.id;
   if(pending&&pending.voice){ ta.disabled=true; document.getElementById('psent').textContent='שולח הודעה קולית…';
-    const r=await fetch('/api/chats/'+encodeURIComponent(cur.chatId)+'/send-voice',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mimetype:pending.mimetype,data:pending.data})}); const j=await r.json().catch(()=>({})); ta.disabled=false;
+    const r=await fetch('/api/chats/'+encodeURIComponent(cur.chatId)+'/send-voice',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mimetype:pending.mimetype,data:pending.data,replyTo:rid})}); const j=await r.json().catch(()=>({})); ta.disabled=false;
     if(!r.ok){ document.getElementById('psent').textContent=''; alert('השליחה נכשלה: '+(j.error||r.status)); return; }
-    clearAttach(); document.getElementById('psent').textContent='נשלח ✓'; setTimeout(()=>document.getElementById('psent').textContent='',2500);
+    clearAttach(); clearReply(); rid=undefined; document.getElementById('psent').textContent='נשלח ✓'; setTimeout(()=>document.getElementById('psent').textContent='',2500);
     if(!text){ setTimeout(()=>{loadChat(true);load();},2000); return; } }
   if(pending){ ta.disabled=true; document.getElementById('psent').textContent='שולח קובץ…';
-    const r=await fetch('/api/chats/'+encodeURIComponent(cur.chatId)+'/send-file',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:pending.name,mimetype:pending.mimetype,data:pending.data,caption:text})}); const j=await r.json().catch(()=>({})); ta.disabled=false;
+    const r=await fetch('/api/chats/'+encodeURIComponent(cur.chatId)+'/send-file',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:pending.name,mimetype:pending.mimetype,data:pending.data,caption:text,replyTo:rid})}); const j=await r.json().catch(()=>({})); ta.disabled=false;
     if(!r.ok){ document.getElementById('psent').textContent=''; alert('השליחה נכשלה: '+(j.error||r.status)); return; }
-    clearAttach(); resetBox(ta); document.getElementById('psent').textContent='נשלח ✓'; setTimeout(()=>document.getElementById('psent').textContent='',2500); setTimeout(()=>{loadChat(true);load();},2000); return; }
+    clearAttach(); clearReply(); resetBox(ta); document.getElementById('psent').textContent='נשלח ✓'; setTimeout(()=>document.getElementById('psent').textContent='',2500); setTimeout(()=>{loadChat(true);load();},2000); return; }
   if(!text) return; ta.disabled=true;
-  const r=await fetch('/api/chats/'+encodeURIComponent(cur.chatId)+'/send',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text})}); const j=await r.json(); ta.disabled=false;
-  if(!r.ok){ alert('השליחה נכשלה: '+(j.error||r.status)); return; } resetBox(ta); document.getElementById('psent').textContent='נשלח ✓'; setTimeout(()=>document.getElementById('psent').textContent='',2500); setTimeout(()=>{loadChat(true);load();},1500); }
+  const r=await fetch('/api/chats/'+encodeURIComponent(cur.chatId)+'/send',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text,replyTo:rid})}); const j=await r.json(); ta.disabled=false;
+  if(!r.ok){ alert('השליחה נכשלה: '+(j.error||r.status)); return; } resetBox(ta); clearReply(); document.getElementById('psent').textContent='נשלח ✓'; setTimeout(()=>document.getElementById('psent').textContent='',2500); setTimeout(()=>{loadChat(true);load();},1500); }
 // text boxes take their direction from the first letter typed (English -> left-to-right, Hebrew or empty -> right-to-left)
 function setDir(el){ const m=el.value.match(/[A-Za-z\\u00C0-\\u024F\\u0590-\\u05FF\\u0600-\\u06FF]/); el.dir=m&&/[A-Za-z\\u00C0-\\u024F]/.test(m[0])?'ltr':'rtl'; }
 document.addEventListener('input',e=>{ if(e.target.matches('textarea,input:not([type])')) setDir(e.target); spellSoon(e.target,true); });
