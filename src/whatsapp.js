@@ -574,6 +574,11 @@ export async function editMessage(id, text) {
   if (!(await msg.edit(text))) throw Object.assign(new Error("too late to edit"), { code: 409 });
   store.markEdited(id, text, before);
 }
+// Forward (העברה) a message as it is - text, picture, voice note or file - to other chats; WhatsApp marks it "Forwarded".
+export async function forwardMessage(id, chatIds) {
+  const msg = await ownMessage(id);
+  for (const chatId of chatIds) await msg.forward(chatId);
+}
 export async function deleteMessage(id, everyone) {
   const msg = await ownMessage(id);
   if (everyone) {

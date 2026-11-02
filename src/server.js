@@ -2,7 +2,7 @@ import express from "express";
 import { config, ROOT } from "./config.js";
 import { installAuth, authEnabled } from "./auth.js";
 import * as store from "./db.js";
-import { state, relink, runBackfill, listChats, phoneFor, resolvePhones, editMessage, deleteMessage } from "./whatsapp.js";
+import { state, relink, runBackfill, listChats, phoneFor, resolvePhones, editMessage, deleteMessage, forwardMessage } from "./whatsapp.js";
 import { buildDigest, localDateKey } from "./digest.js";
 import { summary } from "./status.js";
 import { syncCalendar, calState, inCalendar } from "./calendar.js";
@@ -280,6 +280,18 @@ export function startServer(getClient) {
     catch (e) { res.status(e.code || 500).json({ error: String(e.message).slice(0, 200) }); }
   });
 
+  // Forward a message to up to 5 chats at once (WhatsApp's own limit). Body: { to: [chatId, ...] }
+  app.post("/api/messages/:id/forward", async (req, res) => {
+    const to = [...new Set(Array.isArray(req.body?.to) ? req.body.to.map(String) : [])];
+    if (!to.length || to.length > 5) return res.status(400).json({ error: "choose 1-5 chats" });
+    try {
+      await forwardMessage(req.params.id, to);
+      for (const c of to) store.closeNoReply(c, "you forwarded a message from the dashboard");
+      console.log(`[send] forwarded ${req.params.id} -> ${to.join(", ")}`);
+      res.json({ ok: true });
+    } catch (e) { res.status(e.code || 500).json({ error: String(e.message).slice(0, 200) }); }
+  });
+
   // Disconnect the current phone and show a QR code for another one.
   app.post("/api/unlink", async (req, res) => {
     const clearData = !!req.body?.clearData;
@@ -392,7 +404,7 @@ const PAGE = /* html */ `<!doctype html>
   .empty{color:var(--muted);padding:30px;text-align:center}
   .day{font-size:12.5px;font-weight:700;letter-spacing:.02em;color:var(--muted);margin:18px 6px 8px}
   .add{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
-  .add input,.add select,.clist input,.compose textarea{font:inherit;padding:8px 12px;border:1px solid var(--line);border-radius:14px;background:var(--glass-strong);color:var(--ink);outline:none;-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+  .add input,.add select,.clist input,#fwdq,.compose textarea{font:inherit;padding:8px 12px;border:1px solid var(--line);border-radius:14px;background:var(--glass-strong);color:var(--ink);outline:none;-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
   .add input:focus,.compose textarea:focus,.clist input:focus{border-color:rgba(27,122,74,.5);box-shadow:0 0 0 3px rgba(27,122,74,.15)}
   .add input.t{flex:1;min-width:200px}
   .stat{font-size:13px;color:var(--muted)}
@@ -444,6 +456,11 @@ const PAGE = /* html */ `<!doctype html>
   .b.hl{outline:2px solid var(--accent)}
   .b{position:relative;padding-inline-end:28px}.b .mact{position:absolute;top:2px;inset-inline-end:4px;padding:0 7px;font-size:14px;line-height:18px;opacity:0;background:rgba(255,255,255,.85)}.b:hover .mact{opacity:1}
   .mmenu{position:fixed;z-index:50;display:flex;flex-direction:column;gap:2px;padding:6px;border-radius:14px;background:rgba(255,255,255,.95);box-shadow:var(--shadow);border:1px solid rgba(0,0,0,.08)}.mmenu button{text-align:start;border-radius:9px}
+  .fwd{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.3);padding:16px}.fwd[hidden]{display:none}
+  .fwd .box{width:min(400px,100%);max-height:min(560px,calc(100vh - 32px));display:flex;flex-direction:column;gap:8px;padding:14px;border-radius:var(--r);background:rgba(255,255,255,.97);box-shadow:var(--shadow)}
+  .fwd .what{font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;unicode-bidi:plaintext}
+  .fwd .cl{flex:1;min-height:120px;overflow-x:hidden;border-radius:10px;border:1px solid var(--line)}.fwd .ci{grid-template-columns:auto 1fr;align-items:center}.fwd .ci input{margin:0}
+  .fwd .row{display:flex;gap:8px;align-items:center}.fwd .row .n{flex:1;font-size:12.5px;color:var(--muted)}
   .b.del{border-color:rgba(180,71,29,.45)}.b .flag{display:block;font-size:11px;color:var(--warn);margin-top:3px}.b .flag.ed{color:var(--muted);cursor:help}
   .compose{display:flex;gap:8px;padding:10px 12px;border-top:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.25)}.compose textarea{flex:1;resize:none;height:44px}
   .sent{font-size:12px;color:var(--accent);padding:0 14px 8px}
@@ -477,7 +494,7 @@ const PAGE = /* html */ `<!doctype html>
     :root{--ink:#f1f2f6;--muted:#a7acb8;--line:rgba(255,255,255,.14);--glass:rgba(30,34,44,.55);--glass2:rgba(30,34,44,.4);--glass-strong:rgba(50,55,68,.7);--accent:#3ed48c;--accent2:#1b7a4a;--warn:#ff9a7a;--shadow:0 12px 32px rgba(0,0,0,.35),0 1px 0 rgba(255,255,255,.08) inset}
     body{background:#171a22;background-image:radial-gradient(900px 600px at 85% -10%,rgba(60,120,220,.45),transparent 60%),radial-gradient(700px 500px at -10% 30%,rgba(40,170,130,.35),transparent 60%),radial-gradient(800px 600px at 60% 110%,rgba(140,90,220,.35),transparent 60%)}
     .pill{background:rgba(62,212,140,.16)}.views button.on,nav button.on{background:#fff;color:#111;border-color:#fff}
-    .b{background:rgba(60,66,80,.8);border-color:rgba(255,255,255,.1)}.b.me{background:rgba(35,110,70,.7)}.b .q,.replybar{background:rgba(255,255,255,.08)}.mmenu{background:rgba(40,44,56,.96);border-color:rgba(255,255,255,.12)}.b .mact{background:rgba(40,44,56,.85)}.mph .lbl,.mph .dl{color:#111}
+    .b{background:rgba(60,66,80,.8);border-color:rgba(255,255,255,.1)}.b.me{background:rgba(35,110,70,.7)}.b .q,.replybar{background:rgba(255,255,255,.08)}.mmenu,.fwd .box{background:rgba(40,44,56,.96);border-color:rgba(255,255,255,.12)}.b .mact{background:rgba(40,44,56,.85)}.mph .lbl,.mph .dl{color:#111}
     .strip.ok{background:rgba(40,170,110,.25)}.strip.warn{background:rgba(200,150,30,.25)}.strip.bad{background:rgba(200,80,50,.3)}
     .alert{background:rgba(200,80,50,.3);color:#ffd9cc}.alert.soft{background:rgba(200,150,30,.28);color:#ffe9b0}.qr img{background:#fff}
   }
@@ -510,7 +527,7 @@ const PAGE = /* html */ `<!doctype html>
     nav button{min-height:38px;padding:7px 13px}
 
     /* 16px is the threshold below which iOS Safari zooms the page in on focus */
-    .add input,.add select,.clist input,.rtools input,.compose textarea{font-size:16px;min-height:44px}
+    .add input,.add select,.clist input,#fwdq,.rtools input,.compose textarea{font-size:16px;min-height:44px}
     .add{gap:8px}
     .add select{flex:none;min-width:110px}
     .add input.t{flex:1 1 100%;min-width:0}
@@ -594,6 +611,7 @@ const PAGE = /* html */ `<!doctype html>
 <div class="replybar" id="preply" hidden></div><div class="attach" id="pattach" hidden></div>
 <div class="spell" id="pspell" hidden></div>
 <div class="compose"><button class="clip" title="לצרף תמונה או קובץ" onclick="document.getElementById('pfile').click()">📎</button><input type="file" id="pfile" hidden onchange="pickFile(this.files[0]); this.value=''"><button class="clip" id="pmic" title="להקליט הודעה קולית" onclick="toggleRec()">🎤</button><textarea id="ptext" spellcheck="true" placeholder="לכתוב הודעה… (Enter לשליחה, Shift+Enter לשורה חדשה)"></textarea><button class="primary" onclick="sendMsg()">שליחה</button></div></div>
+<div class="fwd" id="fwd" hidden onclick="if(event.target===this) closeFwd()"><div class="box"><b>↪️ העברה ל…</b><div class="what" id="fwdwhat"></div><input id="fwdq" spellcheck="false" autocorrect="off" placeholder="חיפוש צ'אט או קבוצה…" oninput="renderFwd()"><div class="cl" id="fwdlist"></div><div class="row"><span class="n" id="fwdn">אפשר לבחור עד 5 צ'אטים</span><button onclick="closeFwd()">ביטול</button><button class="primary" id="fwdgo" onclick="doFwd()" disabled>העברה</button></div></div></div>
 <script>
 const ICON={meeting:'📅',call:'📞',follow_up:'✅'};
 const L='he-IL';
@@ -701,7 +719,7 @@ async function showChat(c){ if(cur?.chatId!==c.chatId) clearReply(); cur=c; cons
 let pmsgs={};
 function msgMenu(e){ e.stopPropagation(); const id=e.target.closest('.b').dataset.id, m=pmsgs[id]; if(!m) return; closeMsgMenu();
   const age=Date.now()/1000-m.ts, opts=[];
-  if(!m.deleted_at) opts.push(['↩️ תגובה',()=>replyMsg(m)]);
+  if(!m.deleted_at) opts.push(['↩️ תגובה',()=>replyMsg(m)],['↪️ העברה',()=>fwdMsg(m)]);
   if(m.from_me&&!m.deleted_at&&!m.media_type&&age<15*60) opts.push(['✏️ עריכה',()=>editMsg(m)]);
   if(m.from_me&&!m.deleted_at&&age<60*3600) opts.push(['🗑 מחיקה אצל כולם',()=>delMsg(m,true)]);
   opts.push(['מחיקה רק אצלי',()=>delMsg(m,false)]);
@@ -721,6 +739,25 @@ function quoteHtml(m,all){ if(!m.quoted_body) return ''; const src=m.quoted_stan
   return '<span class="q"'+(m.quoted_stanza?' onclick="jumpToMsg(this)" data-stanza="'+esc(m.quoted_stanza)+'" title="מעבר להודעה המקורית"':'')+'>'+(src?'<b>'+esc(whoSent(src))+'</b>':'')+esc(msgSnippet(src?src.body:m.quoted_body||''))+'</span>'; }
 function jumpToMsg(el){ const s=el.dataset.stanza; const b=[...document.querySelectorAll('#pmsgs .b')].find(x=>x.dataset.id.endsWith('_'+s));
   if(!b){ alert('ההודעה המקורית ישנה מדי ולא מוצגת כאן.'); return; } b.scrollIntoView({block:'center',behavior:'smooth'}); b.classList.add('hl'); setTimeout(()=>b.classList.remove('hl'),1600); }
+// forward (העברה): send this message - text, picture, voice note or file - to up to 5 other chats
+let fwd=null;
+async function fwdMsg(m){ fwd={m,sel:new Set()}; document.getElementById('fwdq').value=''; const k=m.media_type?{image:'📷 תמונה',audio:'🎤 הודעה קולית',ptt:'🎤 הודעה קולית',video:'🎬 סרטון',sticker:'מדבקה',document:'📄 קובץ'}[m.media_type]||'📎 קובץ':'';
+  const t=bodyText(m); document.getElementById('fwdwhat').textContent=[k,t&&msgSnippet(t)].filter(Boolean).join(' · ');
+  document.getElementById('fwd').hidden=false; renderFwd(); document.getElementById('fwdq').focus();
+  if(!chats.length){ try{ chats=await (await fetch('/api/chats')).json(); }catch{} if(fwd) renderFwd(); } }
+function renderFwd(){ if(!fwd) return; const q=(document.getElementById('fwdq').value||'').trim().toLowerCase(), qd=q.replace(/\\D/g,'').replace(/^0/,'');
+  const list=chats.filter(c=>fwd.sel.has(c.id)||!q||(c.name||'').toLowerCase().includes(q)||(qd.length>=4&&(c.phone||'').replace(/\\D/g,'').includes(qd))).slice(0,200);
+  document.getElementById('fwdlist').innerHTML=list.map(c=>'<label class="ci"><input type="checkbox" data-id="'+esc(c.id)+'"'+(fwd.sel.has(c.id)?' checked':'')+(!fwd.sel.has(c.id)&&fwd.sel.size>=5?' disabled':'')+' onchange="pickFwd(this)"><b>'+(c.isGroup?'👥 ':'')+esc(c.name||c.id)+'</b></label>').join('')||'<div class="stat" style="padding:14px">'+(chats.length?'לא נמצא צ\\'אט כזה.':'טוען…')+'</div>';
+  const n=fwd.sel.size; document.getElementById('fwdn').textContent=n?'נבחרו '+n+(n>=5?' (המקסימום)':''):'אפשר לבחור עד 5 צ\\'אטים'; document.getElementById('fwdgo').disabled=!n; }
+function pickFwd(el){ el.checked?fwd.sel.add(el.dataset.id):fwd.sel.delete(el.dataset.id); renderFwd(); }
+function closeFwd(){ fwd=null; document.getElementById('fwd').hidden=true; }
+async function doFwd(){ if(!fwd||!fwd.sel.size) return; const {m,sel}=fwd, go=document.getElementById('fwdgo'); go.disabled=true; go.textContent='מעביר…'; let r,j;
+  try{ r=await fetch('/api/messages/'+encodeURIComponent(m.id)+'/forward',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({to:[...sel]})}); j=await r.json().catch(()=>({})); }catch{ r=null; }
+  go.textContent='העברה';
+  if(!r){ go.disabled=false; alert('אין תשובה מהתוכנה'); return; }
+  if(!r.ok){ go.disabled=false; alert(r.status===409?'WhatsApp לא מחובר כרגע':r.status===404?'ההודעה כבר לא נמצאת ב-WhatsApp, אי אפשר להעביר אותה.':'ההעברה נכשלה: '+(j.error||r.status)); return; }
+  closeFwd(); document.getElementById('psent').textContent='הועבר ✓'; setTimeout(()=>document.getElementById('psent').textContent='',2500); setTimeout(load,1500); }
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&fwd) closeFwd(); });
 function closeMsgMenu(){ document.getElementById('mmenu')?.remove(); }
 document.addEventListener('click',closeMsgMenu);
 async function msgAction(m,what,body,failMsg){ let r,j; try{ r=await fetch('/api/messages/'+encodeURIComponent(m.id)+'/'+what,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}); j=await r.json().catch(()=>({})); }catch{ alert('אין תשובה מהתוכנה'); return; }
@@ -740,7 +777,7 @@ async function loadChat(scroll){ if(!cur) return; const id=cur.chatId; let d; tr
   if(!scroll&&sig===box.dataset.sig) return;
   box.dataset.sig=sig;
   pmsgs={}; for(const m of d.messages) pmsgs[m.id]=m;
-  box.innerHTML=d.messages.map(m=>'<div class="b '+(m.from_me?'me':'')+(m.id===cur.msgId?' hl':'')+(m.deleted_at?' del':'')+'" data-id="'+esc(m.id)+'"><button class="mact" onclick="msgMenu(event)" title="תגובה, עריכה או מחיקה">⋯</button>'+quoteHtml(m,d.messages)+mediaHtml(m)+(bodyText(m)?'<div class="tx">'+esc(bodyText(m))+'</div>':'')+(m.deleted_at?'<span class="flag">🚫 '+(m.from_me?'מחקת את ההודעה הזאת':'נמחקה על ידי השולח')+(m.deleted_at==='unknown'?'':' · '+esc(new Date(m.deleted_at.replace(' ','T')+'Z').toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})))+' · הטקסט נשמר כאן</span>':'')+(m.edited_from?'<span class="flag ed" title="'+esc('לפני העריכה: '+m.edited_from)+'">✏️ נערכה (להצגת המקור: לרחף)</span>':'')+'<span class="t">'+(m.from_me?'':esc(m.sender||'')+' · ')+new Date(m.ts*1000).toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+'</span></div>').join('')||'<div class="stat">עדיין אין הודעות שמורות לצ\\'אט הזה.</div>';
+  box.innerHTML=d.messages.map(m=>'<div class="b '+(m.from_me?'me':'')+(m.id===cur.msgId?' hl':'')+(m.deleted_at?' del':'')+'" data-id="'+esc(m.id)+'"><button class="mact" onclick="msgMenu(event)" title="תגובה, העברה, עריכה או מחיקה">⋯</button>'+quoteHtml(m,d.messages)+mediaHtml(m)+(bodyText(m)?'<div class="tx">'+esc(bodyText(m))+'</div>':'')+(m.deleted_at?'<span class="flag">🚫 '+(m.from_me?'מחקת את ההודעה הזאת':'נמחקה על ידי השולח')+(m.deleted_at==='unknown'?'':' · '+esc(new Date(m.deleted_at.replace(' ','T')+'Z').toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})))+' · הטקסט נשמר כאן</span>':'')+(m.edited_from?'<span class="flag ed" title="'+esc('לפני העריכה: '+m.edited_from)+'">✏️ נערכה (להצגת המקור: לרחף)</span>':'')+'<span class="t">'+(m.from_me?'':esc(m.sender||'')+' · ')+new Date(m.ts*1000).toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+'</span></div>').join('')||'<div class="stat">עדיין אין הודעות שמורות לצ\\'אט הזה.</div>';
   if(scroll||atBottom) box.scrollTop=box.scrollHeight; }
 function fmtSize(n){ if(!n) return ''; return n>1048576?(n/1048576).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB'; }
 function bodyText(m){ if(m.media_type&&m.media_type!=='sticker'&&m.body&&m.body.startsWith('[')){ const i=m.body.indexOf(']'); return i>0?m.body.slice(i+1).trim():''; } return m.body||''; }
