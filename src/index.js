@@ -83,7 +83,7 @@ setInterval(() => syncCalendar(), 3 * 60_000);
 // Deletions the live event missed (e.g. during a reconnect) still show up on the page as "deleted" placeholders.
 setInterval(() => markDeletedOnPage(), 10 * 60_000);
 
-// Self-test every minute; if the Mac was asleep (the timer jumped), test immediately.
+// Self-test every minute; if the Mac was asleep (the timer jumped), skip one tick so it can finish waking.
 let lastTick = Date.now();
 setInterval(() => {
   const gap = Date.now() - lastTick;
@@ -111,7 +111,8 @@ setInterval(() => {
 }, 30_000);
 
 // Watchdog: WhatsApp Web occasionally hangs while "loading chats" and never reports ready.
-// If we sit in a connecting state for more than 3 minutes, restart the connection.
+// If we sit in a connecting state for more than 5 minutes, restart the connection (a gentle
+// reconnect alone can take ~3 min: closing Chrome, up to 2 min to start it again).
 // A failed start or a dropped link ("disconnected") is retried after 1 minute.
 let stuckSince = null;
 setInterval(() => {
@@ -119,7 +120,7 @@ setInterval(() => {
   const dropped = state.status === "disconnected";
   if (!connecting && !dropped) { stuckSince = null; return; }
   stuckSince ??= Date.now();
-  const limit = dropped ? 60_000 : 3 * 60_000;
+  const limit = dropped ? 60_000 : 5 * 60_000;
   if (Date.now() - stuckSince > limit) {
     stuckSince = null;
     hardReconnect(dropped ? "link dropped" : "connection hung").catch((e) => console.error("[watchdog] reconnect failed:", e.message));
