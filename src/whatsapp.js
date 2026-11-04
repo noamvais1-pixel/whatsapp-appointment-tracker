@@ -141,11 +141,14 @@ export function startClient({ onReady } = {}) {
   state.qrDataUrl = null;
   state.me = null;
   state.lastError = null;
-  current = createClient({ onReady: readyHook });
-  current.initialize().catch((e) => {
+  const client = createClient({ onReady: readyHook });
+  current = client;
+  client.initialize().catch(async (e) => {
     state.status = "disconnected";
     state.lastError = String(e.message || e);
     console.error("[whatsapp] failed to start:", e.message);
+    // Close the half-started Chrome now, gently, so the retry doesn't have to kill it mid-write.
+    try { await withTimeout(client.pupBrowser?.close() ?? Promise.resolve(), 20000); } catch {}
   });
   return current;
 }
@@ -214,11 +217,18 @@ export async function hardReconnect(reason = "") {
 }
 
 const run = (cmd, args) => new Promise((resolve) => execFile(cmd, args, () => resolve()));
+const browserStillRunning = () => new Promise((resolve) => execFile("pgrep", ["-f", config.authDir], (err) => resolve(!err)));
 async function killStaleBrowser() {
   // A Chrome that is still holding our profile folder blocks every new launch ("browser is already running").
+  // Ask it to quit and give it time to finish writing: a force-kill while it saves can lose the
+  // WhatsApp login and bring back the QR code (2026-11-03, after the battery ran out).
   await run("pkill", ["-TERM", "-f", config.authDir]);
-  await sleep(4000);
-  await run("pkill", ["-KILL", "-f", config.authDir]);
+  for (let i = 0; i < 30 && (await browserStillRunning()); i++) await sleep(1000);
+  if (await browserStillRunning()) {
+    console.warn("[whatsapp] hidden Chrome did not quit within 30 s - forcing it");
+    await run("pkill", ["-KILL", "-f", config.authDir]);
+    await sleep(1000);
+  }
   for (const f of ["SingletonLock", "SingletonSocket", "SingletonCookie"]) {
     try { fs.rmSync(path.join(config.authDir, "session", f), { force: true }); } catch {}
   }
@@ -232,6 +242,8 @@ function createClient({ onReady } = {}) {
     puppeteer: {
       headless: true,
       executablePath: config.chromePath,
+      // Right after waking from deep sleep Chrome can take well over the default 30 s to start.
+      timeout: 120000,
       args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
     },
   });

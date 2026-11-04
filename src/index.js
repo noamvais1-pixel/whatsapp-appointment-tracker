@@ -88,7 +88,11 @@ let lastTick = Date.now();
 setInterval(() => {
   const gap = Date.now() - lastTick;
   lastTick = Date.now();
-  if (gap > 3 * 60_000) console.log(`[power] the Mac was asleep for ~${Math.round(gap / 60_000)} min - checking the WhatsApp link`);
+  if (gap > 3 * 60_000) {
+    // Give the Mac a minute to finish waking (network, disk) before judging the link.
+    console.log(`[power] the Mac was asleep for ~${Math.round(gap / 60_000)} min - checking the WhatsApp link in a minute`);
+    return;
+  }
   heartbeat().catch((e) => console.error("[heartbeat]", e.message));
 }, 60_000);
 setTimeout(() => heartbeat().catch(() => {}), 20_000);
