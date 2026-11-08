@@ -2,7 +2,7 @@ import express from "express";
 import { config, ROOT } from "./config.js";
 import { installAuth, authEnabled } from "./auth.js";
 import * as store from "./db.js";
-import { state, relink, runBackfill, listChats, phoneFor, resolvePhones, editMessage, deleteMessage, forwardMessage } from "./whatsapp.js";
+import { state, relink, runBackfill, listChats, phoneFor, resolvePhones, editMessage, deleteMessage, forwardMessage, messageInfo } from "./whatsapp.js";
 import { buildDigest, localDateKey } from "./digest.js";
 import { summary } from "./status.js";
 import { syncCalendar, calState, inCalendar } from "./calendar.js";
@@ -134,7 +134,7 @@ export function startServer(getClient) {
     try {
       const media = new MessageMedia(mimetype, data, name || "file");
       const isImage = /^image\/(jpeg|png|webp|gif)$/.test(mimetype) && !asDocument;
-      await client.sendMessage(req.params.chatId, media, { caption: caption || undefined, sendMediaAsDocument: !isImage, quotedMessageId: replyTo || undefined });
+      await client.sendMessage(req.params.chatId, media, { caption: caption || undefined, sendMediaAsDocument: !isImage, sendSeen: false, quotedMessageId: replyTo || undefined });
       store.closeNoReply(req.params.chatId, "you sent a file from the dashboard");
       console.log(`[send] ${isImage ? "image" : "file"} "${name}" -> ${req.params.chatId}`);
       res.json({ ok: true });
@@ -158,7 +158,7 @@ export function startServer(getClient) {
       fs.writeFileSync(`${tmp}.${ext}`, Buffer.from(data, "base64"));
       await new Promise((ok, fail) => execFile(ff, ["-y", "-loglevel", "error", "-i", `${tmp}.${ext}`, "-vn", "-ac", "1", "-ar", "48000", "-c:a", "libopus", "-b:a", "32k", `${tmp}.ogg`], (e) => (e ? fail(e) : ok())));
       const media = new MessageMedia("audio/ogg; codecs=opus", fs.readFileSync(`${tmp}.ogg`).toString("base64"), "voice.ogg");
-      await client.sendMessage(req.params.chatId, media, { sendAudioAsVoice: true, quotedMessageId: replyTo || undefined });
+      await client.sendMessage(req.params.chatId, media, { sendAudioAsVoice: true, sendSeen: false, quotedMessageId: replyTo || undefined });
       store.closeNoReply(req.params.chatId, "you sent a voice note from the dashboard");
       console.log(`[send] voice note -> ${req.params.chatId}`);
       res.json({ ok: true });
@@ -259,7 +259,7 @@ export function startServer(getClient) {
     if (!client || state.status !== "ready") return res.status(409).json({ error: "WhatsApp not linked" });
     try {
       // replyTo: the id of the message this one answers (תגובה), shown quoted above it on both phones
-      await client.sendMessage(req.params.chatId, text, { quotedMessageId: req.body?.replyTo || undefined });
+      await client.sendMessage(req.params.chatId, text, { sendSeen: false, quotedMessageId: req.body?.replyTo || undefined });
       store.closeNoReply(req.params.chatId, "you followed up from the dashboard");
       res.json({ ok: true });
     } catch (e) {
@@ -281,6 +281,9 @@ export function startServer(getClient) {
   });
 
   // Forward a message to up to 5 chats at once (WhatsApp's own limit). Body: { to: [chatId, ...] }
+  app.get("/api/messages/:id/info", async (req, res) => {
+    try { res.json(await messageInfo(req.params.id)); } catch (e) { res.status(e.code || 500).json({ error: String(e.message).slice(0, 200) }); }
+  });
   app.post("/api/messages/:id/forward", async (req, res) => {
     const to = [...new Set(Array.isArray(req.body?.to) ? req.body.to.map(String) : [])];
     if (!to.length || to.length > 5) return res.status(400).json({ error: "choose 1-5 chats" });
@@ -462,6 +465,7 @@ const PAGE = /* html */ `<!doctype html>
   .fwd .cl{flex:1;min-height:120px;overflow-x:hidden;border-radius:10px;border:1px solid var(--line)}.fwd .ci{grid-template-columns:auto 1fr;align-items:center}.fwd .ci input{margin:0}
   .fwd .row{display:flex;gap:8px;align-items:center}.fwd .row .n{flex:1;font-size:12.5px;color:var(--muted)}
   .b.del{border-color:rgba(180,71,29,.45)}.b .flag{display:block;font-size:11px;color:var(--warn);margin-top:3px}.b .flag.ed{color:var(--muted);cursor:help}
+  .b .tk{cursor:pointer;letter-spacing:-3px;margin-inline-start:4px;font-weight:700}.b .tk.rd{color:#2a9df4}
   .compose{display:flex;gap:8px;padding:10px 12px;border-top:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.25)}.compose textarea{flex:1;resize:none;height:44px}
   .sent{font-size:12px;color:var(--accent);padding:0 14px 8px}
   /* spelling: words the Mac's speller doesn't know, with suggestions to click */
@@ -720,6 +724,7 @@ let pmsgs={};
 function msgMenu(e){ e.stopPropagation(); const id=e.target.closest('.b').dataset.id, m=pmsgs[id]; if(!m) return; closeMsgMenu();
   const age=Date.now()/1000-m.ts, opts=[];
   if(!m.deleted_at) opts.push(['↩️ תגובה',()=>replyMsg(m)],['↪️ העברה',()=>fwdMsg(m)]);
+  if(m.from_me&&!m.deleted_at) opts.push(['👁 מי קרא',()=>readInfo(m)]);
   if(m.from_me&&!m.deleted_at&&!m.media_type&&age<15*60) opts.push(['✏️ עריכה',()=>editMsg(m)]);
   if(m.from_me&&!m.deleted_at&&age<60*3600) opts.push(['🗑 מחיקה אצל כולם',()=>delMsg(m,true)]);
   opts.push(['מחיקה רק אצלי',()=>delMsg(m,false)]);
@@ -727,6 +732,18 @@ function msgMenu(e){ e.stopPropagation(); const id=e.target.closest('.b').datase
   for(const [label,fn] of opts){ const b=document.createElement('button'); b.textContent=label; b.onclick=()=>{ closeMsgMenu(); fn(); }; menu.appendChild(b); }
   document.body.appendChild(menu); const r=e.target.getBoundingClientRect();
   menu.style.top=Math.min(r.bottom+4,innerHeight-menu.offsetHeight-8)+'px'; menu.style.left=Math.max(8,Math.min(r.left,innerWidth-menu.offsetWidth-8))+'px'; }
+// ticks on my messages, as in WhatsApp: ✓ sent, ✓✓ grey delivered, ✓✓ blue read. Click them for who read it.
+function ticks(m){ if(!m.from_me||m.deleted_at) return '';
+  const a=m.ack||0, t=a>=3?['✓✓','rd','נקראה']:a===2?['✓✓','','נמסרה, עדיין לא נקראה']:a===1?['✓','','נשלחה, עדיין לא נמסרה']:['🕓','','ממתינה לשליחה'];
+  return ' <span class="tk '+t[1]+'" title="'+t[2]+' (לחיצה: מי קרא)" onclick="event.stopPropagation();readInfo(pmsgs[this.closest(&quot;.b&quot;).dataset.id])">'+t[0]+'</span>'; }
+async function readInfo(m){ if(!m) return; let j; try{ const r=await fetch('/api/messages/'+encodeURIComponent(m.id)+'/info'); j=await r.json(); if(!r.ok) throw new Error(j.error||''); }catch(e){ alert('לא הצלחתי לבדוק מי קרא: '+(e.message||'')); return; }
+  const tm=x=>x.t?' ('+new Date(x.t*1000).toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+')':'';
+  const lines=[];
+  if(j.read.length) lines.push('✓✓ קראו:',...j.read.map(x=>'   '+x.name+tm(x)));
+  if(j.delivered.length) lines.push('✓✓ קיבלו ועוד לא קראו:',...j.delivered.map(x=>'   '+x.name+tm(x)));
+  if(j.waiting) lines.push("✓ עוד לא קיבלו: "+j.waiting);
+  if(!lines.length) lines.push(j.ack>=3?'✓✓ ההודעה נקראה.':j.ack===2?'✓✓ ההודעה נמסרה ועוד לא נקראה.':'✓ ההודעה נשלחה ועוד לא נמסרה.');
+  alert(lines.join(String.fromCharCode(10))); loadChat(false); }
 // reply (תגובה): the next message sent quotes this one, as in WhatsApp
 let replyTo=null;
 const msgSnippet=t=>t.length>90?t.slice(0,90)+'…':t;
@@ -777,7 +794,7 @@ async function loadChat(scroll){ if(!cur) return; const id=cur.chatId; let d; tr
   if(!scroll&&sig===box.dataset.sig) return;
   box.dataset.sig=sig;
   pmsgs={}; for(const m of d.messages) pmsgs[m.id]=m;
-  box.innerHTML=d.messages.map(m=>'<div class="b '+(m.from_me?'me':'')+(m.id===cur.msgId?' hl':'')+(m.deleted_at?' del':'')+'" data-id="'+esc(m.id)+'"><button class="mact" onclick="msgMenu(event)" title="תגובה, העברה, עריכה או מחיקה">⋯</button>'+quoteHtml(m,d.messages)+mediaHtml(m)+(bodyText(m)?'<div class="tx">'+esc(bodyText(m))+'</div>':'')+(m.deleted_at?'<span class="flag">🚫 '+(m.from_me?'מחקת את ההודעה הזאת':'נמחקה על ידי השולח')+(m.deleted_at==='unknown'?'':' · '+esc(new Date(m.deleted_at.replace(' ','T')+'Z').toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})))+' · הטקסט נשמר כאן</span>':'')+(m.edited_from?'<span class="flag ed" title="'+esc('לפני העריכה: '+m.edited_from)+'">✏️ נערכה (להצגת המקור: לרחף)</span>':'')+'<span class="t">'+(m.from_me?'':esc(m.sender||'')+' · ')+new Date(m.ts*1000).toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+'</span></div>').join('')||'<div class="stat">עדיין אין הודעות שמורות לצ\\'אט הזה.</div>';
+  box.innerHTML=d.messages.map(m=>'<div class="b '+(m.from_me?'me':'')+(m.id===cur.msgId?' hl':'')+(m.deleted_at?' del':'')+'" data-id="'+esc(m.id)+'"><button class="mact" onclick="msgMenu(event)" title="תגובה, העברה, עריכה או מחיקה">⋯</button>'+quoteHtml(m,d.messages)+mediaHtml(m)+(bodyText(m)?'<div class="tx">'+esc(bodyText(m))+'</div>':'')+(m.deleted_at?'<span class="flag">🚫 '+(m.from_me?'מחקת את ההודעה הזאת':'נמחקה על ידי השולח')+(m.deleted_at==='unknown'?'':' · '+esc(new Date(m.deleted_at.replace(' ','T')+'Z').toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})))+' · הטקסט נשמר כאן</span>':'')+(m.edited_from?'<span class="flag ed" title="'+esc('לפני העריכה: '+m.edited_from)+'">✏️ נערכה (להצגת המקור: לרחף)</span>':'')+'<span class="t">'+(m.from_me?'':esc(m.sender||'')+' · ')+new Date(m.ts*1000).toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+ticks(m)+'</span></div>').join('')||'<div class="stat">עדיין אין הודעות שמורות לצ\\'אט הזה.</div>';
   if(scroll||atBottom) box.scrollTop=box.scrollHeight; }
 function fmtSize(n){ if(!n) return ''; return n>1048576?(n/1048576).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB'; }
 function bodyText(m){ if(m.media_type&&m.media_type!=='sticker'&&m.body&&m.body.startsWith('[')){ const i=m.body.indexOf(']'); return i>0?m.body.slice(i+1).trim():''; } return m.body||''; }

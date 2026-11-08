@@ -68,6 +68,10 @@ for (const col of ["deleted_at TEXT", "edited_from TEXT", "quoted_stanza TEXT", 
   const name = col.split(" ")[0];
   if (!db.prepare("PRAGMA table_info(messages)").all().some((c) => c.name === name)) db.exec(`ALTER TABLE messages ADD COLUMN ${col}`);
 }
+// For my own messages: how far it got (1 sent ✓, 2 delivered ✓✓, 3 read ✓✓ blue, 4 voice note played).
+if (!db.prepare("PRAGMA table_info(messages)").all().some((c) => c.name === "ack")) {
+  db.exec("ALTER TABLE messages ADD COLUMN ack INTEGER");
+}
 if (!db.prepare("PRAGMA table_info(messages)").all().some((c) => c.name === "media_type")) {
   db.exec("ALTER TABLE messages ADD COLUMN media_type TEXT");
 }
@@ -89,6 +93,8 @@ const stmts = {
     `INSERT OR IGNORE INTO messages (id, chat_id, chat_name, from_me, sender, body, ts, processed, media_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ),
   setMediaType: db.prepare(`UPDATE messages SET media_type = ? WHERE id = ? AND media_type IS NULL`),
+  // only ever moves forward (a late "delivered" must not undo "read")
+  setAck: db.prepare(`UPDATE messages SET ack = ? WHERE id = ? AND from_me = 1 AND (ack IS NULL OR ack < ?)`),
   setQuote: db.prepare(`UPDATE messages SET quoted_stanza = ?, quoted_body = ? WHERE id = ? AND quoted_body IS NULL`),
   markDeleted: db.prepare(`UPDATE messages SET deleted_at = datetime('now') WHERE id = ? AND deleted_at IS NULL`),
   // found already deleted on the page (e.g. deleted while the tracker was off): when it happened is not known
@@ -179,9 +185,11 @@ const stmts = {
 export function saveMessage(m, processed = 0) {
   const r = stmts.insertMsg.run(m.id, m.chatId, m.chatName, m.fromMe ? 1 : 0, m.sender, m.body, m.ts, processed, m.mediaType ?? null);
   if (r.changes === 0 && m.mediaType) stmts.setMediaType.run(m.mediaType, m.id); // older rows saved before media support
+  if (m.fromMe && m.ack > 0) stmts.setAck.run(m.ack, m.id, m.ack);
   if (m.quote) stmts.setQuote.run(m.quote.stanza, m.quote.body, m.id); // new rows, and older ones saved before replies were kept
   return r.changes > 0;
 }
+export const setAck = (id, ack) => (ack > 0 ? stmts.setAck.run(ack, id, ack).changes : 0);
 export const markDeleted = (id) => stmts.markDeleted.run(id).changes;
 export const markDeletedEarlier = (id) => stmts.markDeletedEarlier.run(id).changes;
 export const markEdited = (id, newBody, prevBody) => stmts.markEdited.run(prevBody, newBody, id).changes;

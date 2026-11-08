@@ -124,6 +124,7 @@ export function toRecord(msg, chat) {
     body,
     ts: msg.timestamp,
     mediaType: mediaKind(msg),
+    ack: msg.fromMe ? msg.ack ?? null : null,
     quote: quoteOf(msg),
     // for images/videos WhatsApp ships a tiny base64 JPEG preview in the raw body
     thumb: ["image", "video"].includes(msg.type) && typeof msg._data?.body === "string" && msg._data.body.length > 200 && !/\s/.test(msg._data.body) ? msg._data.body : null,
@@ -272,6 +273,9 @@ function createClient({ onReady } = {}) {
     }
   });
 
+  // Privacy: the tracker never marks chats as read (no blue ticks for the other side), whatever calls it.
+  client.sendSeen = async () => false;
+
   client.on("ready", async () => {
     state.status = "ready";
     state.health.readErrors = 0;
@@ -316,6 +320,11 @@ function createClient({ onReady } = {}) {
       e.unread = chat.unreadCount || 0;
       if (!e.unread) console.log(`[chats] read on the phone: ${e.name}`);
     }
+  });
+
+  // My message was delivered / read / played: update its ticks.
+  client.on("message_ack", (msg, ack) => {
+    try { if (msg?.fromMe && msg.id?._serialized) store.setAck(msg.id._serialized, ack); } catch {}
   });
 
   client.on("message_edit", (msg, newBody, prevBody) => {
@@ -567,7 +576,7 @@ export async function sendToSelf(client, text) {
   client = client || current;
   const me = client?.info?.wid?._serialized;
   if (!me) throw new Error("not linked");
-  await client.sendMessage(me, text);
+  await client.sendMessage(me, text, { sendSeen: false });
 }
 
 // Editing and deleting from the dashboard. WhatsApp allows editing only your own text messages (about 15 minutes
@@ -578,6 +587,27 @@ async function ownMessage(id) {
   const msg = await current.getMessageById(id).catch(() => null);
   if (!msg) throw Object.assign(new Error("message not found in WhatsApp"), { code: 404 });
   return msg;
+}
+// Who has read / received one of my messages (groups: per person; private chats: the one other person).
+export async function messageInfo(id) {
+  const msg = await ownMessage(id);
+  if (!msg.fromMe) throw Object.assign(new Error("not your message"), { code: 403 });
+  const info = await msg.getInfo().catch(() => null);
+  const names = async (list) => {
+    const out = [];
+    for (const r of list || []) {
+      const wid = r.id?._serialized || r.id;
+      let name = wid;
+      try { const c = await current.getContactById(wid); name = c.name || c.pushname || c.number || wid; } catch {}
+      out.push({ name, t: r.t || null });
+    }
+    return out;
+  };
+  const read = await names([...(info?.read || []), ...(info?.played || [])].filter((r, i, a) => a.findIndex((x) => (x.id?._serialized || x.id) === (r.id?._serialized || r.id)) === i));
+  const readIds = new Set(read.map((r) => r.name));
+  const delivered = (await names(info?.delivery)).filter((r) => !readIds.has(r.name));
+  store.setAck(id, msg.ack);
+  return { ack: msg.ack, read, delivered, waiting: info ? (info.deliveryRemaining ?? null) : null, readRemaining: info ? (info.readRemaining ?? null) : null };
 }
 export async function editMessage(id, text) {
   const msg = await ownMessage(id);
