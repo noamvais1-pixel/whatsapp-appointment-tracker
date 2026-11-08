@@ -156,6 +156,7 @@ const stmts = {
   ),
   addHistory: db.prepare(`INSERT INTO history (item_id, action, detail) VALUES (?, ?, ?)`),
   historyFor: db.prepare(`SELECT * FROM history WHERE item_id = ? ORDER BY id`),
+  incomingSince: db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE chat_id = ? AND from_me = 0 AND ts > ?`),
   setMeta: db.prepare(`INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`),
   getMeta: db.prepare(`SELECT value FROM meta WHERE key = ?`),
   editItem: db.prepare(
@@ -251,6 +252,15 @@ export const openItems = () => stmts.openItems.all();
 export const historyFor = (id) => stmts.historyFor.all(id);
 export const setMeta = (k, v) => stmts.setMeta.run(k, String(v));
 export const getMeta = (k) => stmts.getMeta.get(k)?.value ?? null;
+// "Seen in the tracker": opening a chat here clears its new-message circle without telling WhatsApp (no blue ticks).
+export const markSeenHere = (chatId, ts) => { if (ts > Number(getMeta("seen:" + chatId) || 0)) setMeta("seen:" + chatId, ts); };
+/** WhatsApp's unread count, minus the messages already looked at in the tracker. */
+export function unreadHere(chatId, waUnread) {
+  if (!waUnread) return 0;
+  const seen = Number(getMeta("seen:" + chatId) || 0);
+  if (!seen) return waUnread;
+  return Math.min(waUnread, stmts.incomingSince.get(chatId, seen).n);
+}
 export const stats = () => stmts.stats.get();
 export const messagesSince = (ts) => stmts.todayCount.get(ts).n;
 export const lastMessage = () => stmts.lastMessage.get();

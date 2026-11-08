@@ -199,6 +199,7 @@ export function startServer(getClient) {
       }
     }
     const messages = store.recentMessages(chatId, 80);
+    if (messages.length) store.markSeenHere(chatId, messages[messages.length - 1].ts); // opened here: no more "new" circle (WhatsApp is not told)
     for (const m of messages) if (m.media_type && isQueued(m.id)) m.media_status = "downloading";
     if (chatId.endsWith("@g.us")) await nameGroupSenders(client, messages);
     let phone = phoneFor(chatId);
@@ -793,7 +794,7 @@ async function loadChat(scroll){ if(!cur) return; const id=cur.chatId; let d; tr
   const sig=d.messages.map(m=>m.id+':'+(m.quoted_body||'')+':'+(m.media_status||'')+':'+(m.deleted_at||'')+':'+m.body).join('|');
   if(!scroll&&sig===box.dataset.sig) return;
   box.dataset.sig=sig;
-  pmsgs={}; for(const m of d.messages) pmsgs[m.id]=m;
+  pmsgs={}; for(const m of d.messages) pmsgs[m.id]=m; { const c=chats.find(x=>x.id===cur.chatId); if(c&&c.unread){ c.unread=0; if(isChatView(view)) renderChats(); } }
   box.innerHTML=d.messages.map(m=>'<div class="b '+(m.from_me?'me':'')+(m.id===cur.msgId?' hl':'')+(m.deleted_at?' del':'')+'" data-id="'+esc(m.id)+'"><button class="mact" onclick="msgMenu(event)" title="תגובה, העברה, עריכה או מחיקה">⋯</button>'+quoteHtml(m,d.messages)+mediaHtml(m)+(bodyText(m)?'<div class="tx">'+esc(bodyText(m))+'</div>':'')+(m.deleted_at?'<span class="flag">🚫 '+(m.from_me?'מחקת את ההודעה הזאת':'נמחקה על ידי השולח')+(m.deleted_at==='unknown'?'':' · '+esc(new Date(m.deleted_at.replace(' ','T')+'Z').toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})))+' · הטקסט נשמר כאן</span>':'')+(m.edited_from?'<span class="flag ed" title="'+esc('לפני העריכה: '+m.edited_from)+'">✏️ נערכה (להצגת המקור: לרחף)</span>':'')+'<span class="t">'+(m.from_me?'':esc(m.sender||'')+' · ')+new Date(m.ts*1000).toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+ticks(m)+'</span></div>').join('')||'<div class="stat">עדיין אין הודעות שמורות לצ\\'אט הזה.</div>';
   if(scroll||atBottom) box.scrollTop=box.scrollHeight; }
 function fmtSize(n){ if(!n) return ''; return n>1048576?(n/1048576).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB'; }

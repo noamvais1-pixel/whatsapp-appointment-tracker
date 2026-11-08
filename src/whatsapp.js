@@ -503,7 +503,8 @@ let chatListCache = { at: 0, list: [] };
 /** Chat list for the dashboard (live from WhatsApp when linked, else from stored messages). */
 export async function listChats() {
   if (current && state.status === "ready") {
-    if (Date.now() - chatListCache.at < 15000) return chatListCache.list;
+    const here = (list) => list.map((c) => (c.unread ? { ...c, unread: store.unreadHere(c.id, c.unread) } : c));
+    if (Date.now() - chatListCache.at < 15000) return here(chatListCache.list);
     try {
       const chats = await current.getChats();
       loadContactNames(); // in the background
@@ -523,7 +524,7 @@ export async function listChats() {
       chatListCache = { at: Date.now(), list };
       reportRead(true);
       resolvePhones(list.filter((c) => !c.isGroup && !c.phone).map((c) => c.id)); // in the background
-      return list;
+      return here(list);
     } catch (e) {
       console.warn("[chats] could not list chats:", String(e.message).slice(0, 100));
       reportRead(false, e);
