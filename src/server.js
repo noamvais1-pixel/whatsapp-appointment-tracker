@@ -396,7 +396,10 @@ const PAGE = /* html */ `<!doctype html>
   .strip b{font-weight:650}.strip .d{display:none;font-size:13px;color:var(--muted);margin-inline-start:8px}.strip.open .d{display:inline}
   .qr{border-radius:var(--r);padding:22px;text-align:center;margin:12px 0 22px;background:var(--glass);-webkit-backdrop-filter:blur(26px);backdrop-filter:blur(26px);border:1px solid var(--line);box-shadow:var(--shadow)}
   .qr img{width:260px;height:260px;border-radius:14px;background:#fff;padding:8px}
-  .views{display:flex;gap:6px;margin:0 0 14px;padding:4px;border-radius:99px;width:max-content;background:var(--glass2);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);border:1px solid var(--line)}
+  .vrow{display:flex;align-items:center;gap:10px;margin:0 0 14px}
+  #tsearch{font:inherit;width:300px;margin-inline-start:auto;padding:9px 14px;border:1px solid var(--line);border-radius:99px;background:var(--glass-strong);color:var(--ink);outline:none;-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+  #tsearch:focus{border-color:rgba(27,122,74,.5);box-shadow:0 0 0 3px rgba(27,122,74,.15)}
+  .views{display:flex;gap:6px;margin:0;padding:4px;border-radius:99px;width:max-content;background:var(--glass2);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);border:1px solid var(--line)}
   .views button{border:0;background:transparent;box-shadow:none;padding:6px 16px}.views button.on{background:var(--ink);color:#fff}
   nav{display:flex;gap:6px;margin:6px 0 16px;flex-wrap:wrap}nav button{padding:6px 12px}nav button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
   .card{border-radius:var(--r2);padding:13px 15px;margin-bottom:10px;display:grid;grid-template-columns:34px 1fr auto;gap:10px;align-items:start;
@@ -527,6 +530,7 @@ const PAGE = /* html */ `<!doctype html>
 
     main,main.wide{padding:12px 10px calc(48px + env(safe-area-inset-bottom));max-width:100%}
 
+    .vrow{flex-wrap:wrap}#tsearch{width:100%;font-size:16px;min-height:44px}
     .views{width:100%;justify-content:stretch}
     .views button{flex:1;padding:9px 4px;font-size:13.5px;min-height:40px;text-align:center}
     nav button{min-height:38px;padding:7px 13px}
@@ -594,7 +598,7 @@ const PAGE = /* html */ `<!doctype html>
 <div id="hdracts"><button id="checkbtn" onclick="checkNow()">לבדוק הודעות חדשות עכשיו</button><button onclick="openDigest()">סדר היום</button><button onclick="checkUpdates()" title="לבדוק אם יש גרסה חדשה ב-GitHub ולהתקין אותה">בדיקת עדכונים</button><button id="switchbtn" onclick="switchPhone()">החלפת טלפון</button><button onclick="quitApp()" title="לעצור את התוכנה">יציאה</button></div></header>
 <div id="strip" class="strip" onclick="this.classList.toggle('open')"><span class="dot"></span><b id="stext">בודק…</b><span class="d" id="sdetails"></span><span class="grow"></span><span class="stat">לחיצה לפרטים</span></div>
 <main id="main">
-<div class="views"><button id="v-tasks" class="on" onclick="setView('tasks')">משימות</button><button id="v-refs" onclick="setView('refs')">מספרים וקישורים</button><button id="v-chats" onclick="setView('chats')">צ'אטים</button><button id="v-groups" onclick="setView('groups')">קבוצות</button></div>
+<div class="vrow"><div class="views"><button id="v-tasks" class="on" onclick="setView('tasks')">משימות</button><button id="v-refs" onclick="setView('refs')">מספרים וקישורים</button><button id="v-chats" onclick="setView('chats')">צ'אטים</button><button id="v-groups" onclick="setView('groups')">קבוצות</button></div><input id="tsearch" type="search" spellcheck="false" autocorrect="off" placeholder="חיפוש משימה, שם, צ'אט או מילה מההודעה…" oninput="render()"></div>
 <div id="alerts"></div>
 <div id="qr" class="qr" style="display:none"><div style="margin-bottom:10px">בטלפון שרוצים לעקוב אחריו: <b>וואטסאפ ← הגדרות ← מכשירים מקושרים ← קישור מכשיר</b>, ואז לסרוק:</div><img id="qrimg" alt="קוד QR"></div>
 <form class="add" onsubmit="return addItem(event)"><select id="ntype"><option value="follow_up">מעקב</option><option value="meeting">פגישה</option><option value="call">שיחה</option></select>
@@ -635,12 +639,17 @@ function groups(items){ const today=S.today, open=items.filter(i=>i.status==='op
   done: items.filter(i=>i.status!=='open'),
 };}
 const STATUS_HE={done:'בוצע',cancelled:'בוטל'};
+function matchItem(it,q){ if(!q) return true; const qd=q.replace(/\\D/g,'').replace(/^0/,'');
+  const txt=[it.title,it.who,it.chat_name,it.location,it.notes,it.source_quote,fmtWhen(it)].filter(Boolean).join(' ').toLowerCase();
+  if(q.split(/\\s+/).every(w=>txt.includes(w))) return true;
+  return qd.length>=4&&[it.who,it.chat_name,it.title,it.notes,it.source_quote].some(x=>(x||'').replace(/\\D/g,'').includes(qd)); }
 function render(){
-  const g=groups(S.items);
+  const q=(document.getElementById('tsearch').value||'').trim().toLowerCase();
+  const g=groups(S.items.filter(it=>matchItem(it,q)));
   const tabs=[['today','היום',g.today.length],['upcoming','קרוב',g.upcoming.length],['overdue','באיחור',g.overdue.length],['followups','מעקבים',g.followups.length],['undated','בלי תאריך',g.undated.length],['all','כל הפתוחים',g.all.length],['done','בוצע / בוטל',g.done.length]];
   document.getElementById('tabs').innerHTML=tabs.map(([k,l,n])=>'<button class="'+(tab===k?'on':'')+'" onclick="setTab(\\''+k+'\\')">'+l+' <span class="muted">'+n+'</span></button>').join('');
   const items=g[tab]; const list=document.getElementById('list');
-  if(!items.length){ list.innerHTML='<div class="empty">אין כאן כלום.</div>'; return; }
+  if(!items.length){ list.innerHTML='<div class="empty">'+(q?'לא נמצא כלום שמתאים לחיפוש בלשונית הזו. המספרים ליד כל לשונית מראים איפה יש תוצאות.':'אין כאן כלום.')+'</div>'; return; }
   let html='', last=null;
   for(const it of items){ const d=key(it); if(tab!=='done'&&d!==last){ html+='<div class="day">'+dayLabel(d,S.today)+'</div>'; last=d; }
     const over=it.status==='open'&&d&&d<S.today;
@@ -694,7 +703,7 @@ function setView(v){ const prev=view; view=v; localStorage.setItem('view',v); co
   if(cv&&isChatView(prev)&&prev!==v&&cur){ closeChat(); }
   document.getElementById('csearch').placeholder=v==='groups'?'חיפוש קבוצה…':'חיפוש צ\\'אט או מספר טלפון…'; document.querySelector('#chatsview .newchat').style.display=v==='groups'?'none':'';
   for(const k of ['tasks','refs','chats','groups']) document.getElementById('v-'+k).classList.toggle('on',v===k);
-  document.getElementById('tasksview').style.display=v==='tasks'?'':'none'; document.querySelector('.add').style.display=v==='tasks'?'':'none';
+  document.getElementById('tasksview').style.display=v==='tasks'?'':'none'; document.querySelector('.add').style.display=v==='tasks'?'':'none'; document.getElementById('tsearch').style.display=v==='tasks'?'':'none';
   document.getElementById('refsview').classList.toggle('on',v==='refs'); if(v==='refs') loadRefs();
   document.getElementById('chatsview').classList.toggle('on',cv); document.getElementById('main').classList.toggle('wide',cv);
   const panel=document.getElementById('panel');
