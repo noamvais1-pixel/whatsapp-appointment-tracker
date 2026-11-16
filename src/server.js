@@ -412,7 +412,7 @@ const PAGE = /* html */ `<!doctype html>
   .day{font-size:12.5px;font-weight:700;letter-spacing:.02em;color:var(--muted);margin:18px 6px 8px}
   .add{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
   .add input,.add select,.clist input,#fwdq,.compose textarea{font:inherit;padding:8px 12px;border:1px solid var(--line);border-radius:14px;background:var(--glass-strong);color:var(--ink);outline:none;-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
-  .add input:focus,.compose textarea:focus,.clist input:focus{border-color:rgba(27,122,74,.5);box-shadow:0 0 0 3px rgba(27,122,74,.15)}
+  .add input:focus,.add select:focus,#fwdq:focus,.compose textarea:focus,.clist input:focus{border-color:rgba(27,122,74,.5);box-shadow:0 0 0 3px rgba(27,122,74,.15)}
   .add input.t{flex:1;min-width:200px}
   .stat{font-size:13px;color:var(--muted)}
   .alert{border-radius:var(--r2);padding:12px 16px;margin:0 0 16px;font-weight:600;background:rgba(255,150,120,.35);color:#7a2e10;border:1px solid rgba(255,255,255,.6);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
@@ -463,8 +463,9 @@ const PAGE = /* html */ `<!doctype html>
   .b.hl{outline:2px solid var(--accent)}
   .b{position:relative;padding-inline-end:28px}.b .mact{position:absolute;top:2px;inset-inline-end:4px;padding:0 7px;font-size:14px;line-height:18px;opacity:0;background:rgba(255,255,255,.85)}.b:hover .mact{opacity:1}
   .mmenu{position:fixed;z-index:50;display:flex;flex-direction:column;gap:2px;padding:6px;border-radius:14px;background:rgba(255,255,255,.95);box-shadow:var(--shadow);border:1px solid rgba(0,0,0,.08)}.mmenu button{text-align:start;border-radius:9px}
-  .fwd{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.3);padding:16px}.fwd[hidden]{display:none}
-  .fwd .box{width:min(400px,100%);max-height:min(560px,calc(100vh - 32px));display:flex;flex-direction:column;gap:8px;padding:14px;border-radius:var(--r);background:rgba(255,255,255,.97);box-shadow:var(--shadow)}
+  .fwd{width:min(400px,calc(100% - 32px));max-height:min(560px,calc(100vh - 32px));padding:14px;border:0;border-radius:var(--r);background:rgba(255,255,255,.97);color:var(--ink);box-shadow:var(--shadow)}
+  .fwd[open]{display:flex;flex-direction:column;gap:8px}.fwd:modal{overscroll-behavior:contain}
+  .fwd::backdrop{background:rgba(0,0,0,.3);overflow:hidden;overscroll-behavior:contain}
   .fwd .what{font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;unicode-bidi:plaintext}
   .fwd .cl{flex:1;min-height:120px;overflow-x:hidden;border-radius:10px;border:1px solid var(--line)}.fwd .ci{grid-template-columns:auto 1fr;align-items:center}.fwd .ci input{margin:0}
   .fwd .row{display:flex;gap:8px;align-items:center}.fwd .row .n{flex:1;font-size:12.5px;color:var(--muted)}
@@ -502,7 +503,7 @@ const PAGE = /* html */ `<!doctype html>
     :root{--ink:#f1f2f6;--muted:#a7acb8;--line:rgba(255,255,255,.14);--glass:rgba(30,34,44,.55);--glass2:rgba(30,34,44,.4);--glass-strong:rgba(50,55,68,.7);--accent:#3ed48c;--accent2:#1b7a4a;--warn:#ff9a7a;--shadow:0 12px 32px rgba(0,0,0,.35),0 1px 0 rgba(255,255,255,.08) inset}
     body{background:#171a22;background-image:radial-gradient(900px 600px at 85% -10%,rgba(60,120,220,.45),transparent 60%),radial-gradient(700px 500px at -10% 30%,rgba(40,170,130,.35),transparent 60%),radial-gradient(800px 600px at 60% 110%,rgba(140,90,220,.35),transparent 60%)}
     .pill{background:rgba(62,212,140,.16)}.views button.on,nav button.on{background:#fff;color:#111;border-color:#fff}
-    .b{background:rgba(60,66,80,.8);border-color:rgba(255,255,255,.1)}.b.me{background:rgba(35,110,70,.7)}.b .q,.replybar{background:rgba(255,255,255,.08)}.mmenu,.fwd .box{background:rgba(40,44,56,.96);border-color:rgba(255,255,255,.12)}.b .mact{background:rgba(40,44,56,.85)}.mph .lbl,.mph .dl{color:#111}
+    .b{background:rgba(60,66,80,.8);border-color:rgba(255,255,255,.1)}.b.me{background:rgba(35,110,70,.7)}.b .q,.replybar{background:rgba(255,255,255,.08)}.mmenu,.fwd{background:rgba(40,44,56,.96);border-color:rgba(255,255,255,.12)}.b .mact{background:rgba(40,44,56,.85)}.mph .lbl,.mph .dl{color:#111}
     .strip.ok{background:rgba(40,170,110,.25)}.strip.warn{background:rgba(200,150,30,.25)}.strip.bad{background:rgba(200,80,50,.3)}
     .alert{background:rgba(200,80,50,.3);color:#ffd9cc}.alert.soft{background:rgba(200,150,30,.28);color:#ffe9b0}.qr img{background:#fff}
   }
@@ -593,34 +594,37 @@ const PAGE = /* html */ `<!doctype html>
       body.chats #panel{min-height:58dvh}
     }
   }
+  /* box-shadow focus rings disappear in Forced Colors / High Contrast mode: fall back to a real outline there */
+  @media (forced-colors: active){ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid CanvasText;outline-offset:2px} }
+  [role="button"]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 </style></head><body>
 <header><h1>פגישות ומעקבים</h1><span id="status" class="pill">…</span><span id="bf" class="stat"></span><span class="grow"></span>
 <div id="hdracts"><button id="checkbtn" onclick="checkNow()">לבדוק הודעות חדשות עכשיו</button><button onclick="openDigest()">סדר היום</button><button onclick="checkUpdates()" title="לבדוק אם יש גרסה חדשה ב-GitHub ולהתקין אותה">בדיקת עדכונים</button><button id="switchbtn" onclick="switchPhone()">החלפת טלפון</button><button onclick="quitApp()" title="לעצור את התוכנה">יציאה</button></div></header>
 <div id="strip" class="strip" onclick="this.classList.toggle('open')"><span class="dot"></span><b id="stext">בודק…</b><span class="d" id="sdetails"></span><span class="grow"></span><span class="stat">לחיצה לפרטים</span></div>
 <main id="main">
-<div class="vrow"><div class="views"><button id="v-tasks" class="on" onclick="setView('tasks')">משימות</button><button id="v-refs" onclick="setView('refs')">מספרים וקישורים</button><button id="v-chats" onclick="setView('chats')">צ'אטים</button><button id="v-groups" onclick="setView('groups')">קבוצות</button></div><input id="tsearch" type="search" spellcheck="false" autocorrect="off" placeholder="חיפוש משימה, שם, צ'אט או מילה מההודעה…" oninput="render()"></div>
+<div class="vrow"><div class="views"><button id="v-tasks" class="on" onclick="setView('tasks')">משימות</button><button id="v-refs" onclick="setView('refs')">מספרים וקישורים</button><button id="v-chats" onclick="setView('chats')">צ'אטים</button><button id="v-groups" onclick="setView('groups')">קבוצות</button></div><input id="tsearch" type="search" aria-label="חיפוש משימה" enterkeyhint="search" spellcheck="false" autocorrect="off" placeholder="חיפוש משימה, שם, צ'אט או מילה מההודעה…" oninput="render()"></div>
 <div id="alerts"></div>
 <div id="qr" class="qr" style="display:none"><div style="margin-bottom:10px">בטלפון שרוצים לעקוב אחריו: <b>וואטסאפ ← הגדרות ← מכשירים מקושרים ← קישור מכשיר</b>, ואז לסרוק:</div><img id="qrimg" alt="קוד QR"></div>
-<form class="add" onsubmit="return addItem(event)"><select id="ntype"><option value="follow_up">מעקב</option><option value="meeting">פגישה</option><option value="call">שיחה</option></select>
-<input class="t" id="ntitle" spellcheck="true" placeholder="להוסיף משהו בעצמך, למשל: להתקשר לבנק בקשר לכרטיס"><input id="nwhen" type="datetime-local"><button class="primary">הוספה</button></form>
+<form class="add" onsubmit="return addItem(event)"><select id="ntype" aria-label="סוג"><option value="follow_up">מעקב</option><option value="meeting">פגישה</option><option value="call">שיחה</option></select>
+<input class="t" id="ntitle" aria-label="משימה חדשה" spellcheck="true" placeholder="להוסיף משהו בעצמך, למשל: להתקשר לבנק בקשר לכרטיס"><input id="nwhen" type="datetime-local" aria-label="מתי"><button class="primary">הוספה</button></form>
 <div class="spell" id="nspell" hidden></div>
 <div id="tasksview">
 <nav id="tabs"></nav>
 <div id="list"></div>
 </div>
 <div id="refsview">
-<div class="rtools"><input id="rsearch" spellcheck="false" autocorrect="off" placeholder="חיפוש מספר, קישור, שם או מילה מההודעה…" oninput="renderRefs()"><button onclick="copyAllRefs()">העתקת הכל</button></div>
+<div class="rtools"><input id="rsearch" type="search" aria-label="חיפוש מספרים וקישורים" enterkeyhint="search" spellcheck="false" autocorrect="off" placeholder="חיפוש מספר, קישור, שם או מילה מההודעה…" oninput="renderRefs()"><button onclick="copyAllRefs()">העתקת הכל</button></div>
 <nav id="rtabs"></nav>
 <div id="rlist"></div>
 </div>
-<div id="chatsview"><div class="clist"><div class="csrow"><input id="csearch" spellcheck="false" autocorrect="off" placeholder="חיפוש צ'אט או מספר טלפון…" oninput="renderChats()"><button class="newchat" title="צ'אט חדש לפי מספר טלפון" onclick="newChatPrompt()">＋ מספר</button></div><div class="cl" id="clist"></div></div><div id="cslot" class="cempty">בוחרים צ'אט מהרשימה</div></div>
+<div id="chatsview"><div class="clist"><div class="csrow"><input id="csearch" type="search" aria-label="חיפוש צ'אט" spellcheck="false" autocorrect="off" placeholder="חיפוש צ'אט או מספר טלפון…" oninput="renderChats()"><button class="newchat" title="צ'אט חדש לפי מספר טלפון" onclick="newChatPrompt()">＋ מספר</button></div><div class="cl" id="clist"></div></div><div id="cslot" class="cempty">בוחרים צ'אט מהרשימה</div></div>
 </main>
 <div id="panel"><div class="ph"><b id="pname"><span id="pname-t"></span><span class="pn" id="pphone"></span></b><span id="pstatus" class="stat"></span><button onclick="closeChat()">סגירה</button></div>
-<div class="msgs" id="pmsgs"></div><div class="sent" id="psent"></div>
+<div class="msgs" id="pmsgs"></div><div class="sent" id="psent" role="status"></div>
 <div class="replybar" id="preply" hidden></div><div class="attach" id="pattach" hidden></div>
 <div class="spell" id="pspell" hidden></div>
-<div class="compose"><button class="clip" title="לצרף תמונה או קובץ" onclick="document.getElementById('pfile').click()">📎</button><input type="file" id="pfile" hidden onchange="pickFile(this.files[0]); this.value=''"><button class="clip" id="pmic" title="להקליט הודעה קולית" onclick="toggleRec()">🎤</button><textarea id="ptext" spellcheck="true" placeholder="לכתוב הודעה… (Enter לשליחה, Shift+Enter לשורה חדשה)"></textarea><button class="primary" onclick="sendMsg()">שליחה</button></div></div>
-<div class="fwd" id="fwd" hidden onclick="if(event.target===this) closeFwd()"><div class="box"><b>↪️ העברה ל…</b><div class="what" id="fwdwhat"></div><input id="fwdq" spellcheck="false" autocorrect="off" placeholder="חיפוש צ'אט או קבוצה…" oninput="renderFwd()"><div class="cl" id="fwdlist"></div><div class="row"><span class="n" id="fwdn">אפשר לבחור עד 5 צ'אטים</span><button onclick="closeFwd()">ביטול</button><button class="primary" id="fwdgo" onclick="doFwd()" disabled>העברה</button></div></div></div>
+<div class="compose"><button class="clip" title="לצרף תמונה או קובץ" aria-label="לצרף תמונה או קובץ" onclick="document.getElementById('pfile').click()">📎</button><input type="file" id="pfile" hidden onchange="pickFile(this.files[0]); this.value=''"><button class="clip" id="pmic" title="להקליט הודעה קולית" aria-label="להקליט הודעה קולית" onclick="toggleRec()">🎤</button><textarea id="ptext" aria-label="הודעה" enterkeyhint="send" spellcheck="true" placeholder="לכתוב הודעה… (Enter לשליחה, Shift+Enter לשורה חדשה)"></textarea><button class="primary" onclick="sendMsg()">שליחה</button></div></div>
+<dialog class="fwd" id="fwd" closedby="any" aria-labelledby="fwdTitle"><b id="fwdTitle">↪️ העברה ל…</b><div class="what" id="fwdwhat"></div><input id="fwdq" type="search" aria-label="חיפוש צ'אט או קבוצה" spellcheck="false" autocorrect="off" placeholder="חיפוש צ'אט או קבוצה…" oninput="renderFwd()"><div class="cl" id="fwdlist"></div><div class="row"><span class="n" id="fwdn">אפשר לבחור עד 5 צ'אטים</span><button onclick="closeFwd()">ביטול</button><button class="primary" id="fwdgo" onclick="doFwd()" disabled>העברה</button></div></dialog>
 <script>
 const ICON={meeting:'📅',call:'📞',follow_up:'✅'};
 const L='he-IL';
@@ -765,26 +769,34 @@ function clearReply(){ replyTo=null; renderReply(); }
 function quoteHtml(m,all){ if(!m.quoted_body) return ''; const src=m.quoted_stanza&&all.find(x=>x.id.endsWith('_'+m.quoted_stanza));
   return '<span class="q"'+(m.quoted_stanza?' onclick="jumpToMsg(this)" data-stanza="'+esc(m.quoted_stanza)+'" title="מעבר להודעה המקורית"':'')+'>'+(src?'<b>'+esc(whoSent(src))+'</b>':'')+esc(msgSnippet(src?src.body:m.quoted_body||''))+'</span>'; }
 function jumpToMsg(el){ const s=el.dataset.stanza; const b=[...document.querySelectorAll('#pmsgs .b')].find(x=>x.dataset.id.endsWith('_'+s));
-  if(!b){ alert('ההודעה המקורית ישנה מדי ולא מוצגת כאן.'); return; } b.scrollIntoView({block:'center',behavior:'smooth'}); b.classList.add('hl'); setTimeout(()=>b.classList.remove('hl'),1600); }
+  if(!b){ alert('ההודעה המקורית ישנה מדי ולא מוצגת כאן.'); return; } b.scrollIntoView({block:'center',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'}); b.classList.add('hl'); setTimeout(()=>b.classList.remove('hl'),1600); }
 // forward (העברה): send this message - text, picture, voice note or file - to up to 5 other chats
 let fwd=null;
 async function fwdMsg(m){ fwd={m,sel:new Set()}; document.getElementById('fwdq').value=''; const k=m.media_type?{image:'📷 תמונה',audio:'🎤 הודעה קולית',ptt:'🎤 הודעה קולית',video:'🎬 סרטון',sticker:'מדבקה',document:'📄 קובץ'}[m.media_type]||'📎 קובץ':'';
   const t=bodyText(m); document.getElementById('fwdwhat').textContent=[k,t&&msgSnippet(t)].filter(Boolean).join(' · ');
-  document.getElementById('fwd').hidden=false; renderFwd(); document.getElementById('fwdq').focus();
+  document.getElementById('fwd').showModal(); renderFwd(); document.getElementById('fwdq').focus();
   if(!chats.length){ try{ chats=await (await fetch('/api/chats')).json(); }catch{} if(fwd) renderFwd(); } }
 function renderFwd(){ if(!fwd) return; const q=(document.getElementById('fwdq').value||'').trim().toLowerCase(), qd=q.replace(/\\D/g,'').replace(/^0/,'');
   const list=chats.filter(c=>fwd.sel.has(c.id)||!q||(c.name||'').toLowerCase().includes(q)||(qd.length>=4&&(c.phone||'').replace(/\\D/g,'').includes(qd))).slice(0,200);
   document.getElementById('fwdlist').innerHTML=list.map(c=>'<label class="ci"><input type="checkbox" data-id="'+esc(c.id)+'"'+(fwd.sel.has(c.id)?' checked':'')+(!fwd.sel.has(c.id)&&fwd.sel.size>=5?' disabled':'')+' onchange="pickFwd(this)"><b>'+(c.isGroup?'👥 ':'')+esc(c.name||c.id)+'</b></label>').join('')||'<div class="stat" style="padding:14px">'+(chats.length?'לא נמצא צ\\'אט כזה.':'טוען…')+'</div>';
   const n=fwd.sel.size; document.getElementById('fwdn').textContent=n?'נבחרו '+n+(n>=5?' (המקסימום)':''):'אפשר לבחור עד 5 צ\\'אטים'; document.getElementById('fwdgo').disabled=!n; }
 function pickFwd(el){ el.checked?fwd.sel.add(el.dataset.id):fwd.sel.delete(el.dataset.id); renderFwd(); }
-function closeFwd(){ fwd=null; document.getElementById('fwd').hidden=true; }
+function closeFwd(){ fwd=null; const d=document.getElementById('fwd'); if(d.open) d.close(); }
+// Esc, the back gesture and clicking outside close the native dialog; reset the state whichever way it closed
+document.getElementById('fwd').addEventListener('close',()=>{ fwd=null; });
+if(!('closedBy' in HTMLDialogElement.prototype)){ const d=document.getElementById('fwd'), out=e=>{ const r=d.getBoundingClientRect(); return e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom; }; let po=false; d.addEventListener('pointerdown',e=>{ po=out(e); }); d.addEventListener('pointerup',e=>{ if(po&&out(e)) d.close(); }); }
 async function doFwd(){ if(!fwd||!fwd.sel.size) return; const {m,sel}=fwd, go=document.getElementById('fwdgo'); go.disabled=true; go.textContent='מעביר…'; let r,j;
   try{ r=await fetch('/api/messages/'+encodeURIComponent(m.id)+'/forward',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({to:[...sel]})}); j=await r.json().catch(()=>({})); }catch{ r=null; }
   go.textContent='העברה';
   if(!r){ go.disabled=false; alert('אין תשובה מהתוכנה'); return; }
   if(!r.ok){ go.disabled=false; alert(r.status===409?'WhatsApp לא מחובר כרגע':r.status===404?'ההודעה כבר לא נמצאת ב-WhatsApp, אי אפשר להעביר אותה.':'ההעברה נכשלה: '+(j.error||r.status)); return; }
   closeFwd(); document.getElementById('psent').textContent='הועבר ✓'; setTimeout(()=>document.getElementById('psent').textContent='',2500); setTimeout(load,1500); }
-document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&fwd) closeFwd(); });
+// Clickable non-button elements (chat rows, ✕ on reply/attachment, quoted message, read ticks, task titles, media):
+// make them focusable buttons for keyboard and screen-reader users. Enter acts on keydown, Space on keyup, like a <button>.
+function kbdify(root){ for(const el of (root||document).querySelectorAll('[onclick]:not(button,a,input,select,textarea,label,dialog)')){ if(el.hasAttribute('role')) continue; el.setAttribute('role','button'); el.tabIndex=0; if(el.title&&!el.hasAttribute('aria-label')&&el.tagName!=='IMG'&&el.textContent.trim().length<3) el.setAttribute('aria-label',el.title); } }
+new MutationObserver(()=>kbdify()).observe(document.body,{childList:true,subtree:true}); kbdify();
+document.addEventListener('keydown',e=>{ const t=e.target; if(t.getAttribute&&t.getAttribute('role')==='button'&&!/^(BUTTON|A|INPUT|SELECT|TEXTAREA)$/.test(t.tagName)){ if(e.key==='Enter'){ e.preventDefault(); t.click(); } else if(e.key===' ') e.preventDefault(); } });
+document.addEventListener('keyup',e=>{ const t=e.target; if(e.key===' '&&t.getAttribute&&t.getAttribute('role')==='button'&&!/^(BUTTON|A|INPUT|SELECT|TEXTAREA)$/.test(t.tagName)) t.click(); });
 function closeMsgMenu(){ document.getElementById('mmenu')?.remove(); }
 document.addEventListener('click',closeMsgMenu);
 async function msgAction(m,what,body,failMsg){ let r,j; try{ r=await fetch('/api/messages/'+encodeURIComponent(m.id)+'/'+what,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}); j=await r.json().catch(()=>({})); }catch{ alert('אין תשובה מהתוכנה'); return; }
@@ -804,16 +816,16 @@ async function loadChat(scroll){ if(!cur) return; const id=cur.chatId; let d; tr
   if(!scroll&&sig===box.dataset.sig) return;
   box.dataset.sig=sig;
   pmsgs={}; for(const m of d.messages) pmsgs[m.id]=m; { const c=chats.find(x=>x.id===cur.chatId); if(c&&c.unread){ c.unread=0; if(isChatView(view)) renderChats(); } }
-  box.innerHTML=d.messages.map(m=>'<div class="b '+(m.from_me?'me':'')+(m.id===cur.msgId?' hl':'')+(m.deleted_at?' del':'')+'" data-id="'+esc(m.id)+'"><button class="mact" onclick="msgMenu(event)" title="תגובה, העברה, עריכה או מחיקה">⋯</button>'+quoteHtml(m,d.messages)+mediaHtml(m)+(bodyText(m)?'<div class="tx">'+esc(bodyText(m))+'</div>':'')+(m.deleted_at?'<span class="flag">🚫 '+(m.from_me?'מחקת את ההודעה הזאת':'נמחקה על ידי השולח')+(m.deleted_at==='unknown'?'':' · '+esc(new Date(m.deleted_at.replace(' ','T')+'Z').toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})))+' · הטקסט נשמר כאן</span>':'')+(m.edited_from?'<span class="flag ed" title="'+esc('לפני העריכה: '+m.edited_from)+'">✏️ נערכה (להצגת המקור: לרחף)</span>':'')+'<span class="t">'+(m.from_me?'':esc(m.sender||'')+' · ')+new Date(m.ts*1000).toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+ticks(m)+'</span></div>').join('')||'<div class="stat">עדיין אין הודעות שמורות לצ\\'אט הזה.</div>';
+  box.innerHTML=d.messages.map(m=>'<div class="b '+(m.from_me?'me':'')+(m.id===cur.msgId?' hl':'')+(m.deleted_at?' del':'')+'" data-id="'+esc(m.id)+'"><button class="mact" onclick="msgMenu(event)" title="תגובה, העברה, עריכה או מחיקה" aria-label="פעולות להודעה">⋯</button>'+quoteHtml(m,d.messages)+mediaHtml(m)+(bodyText(m)?'<div class="tx">'+esc(bodyText(m))+'</div>':'')+(m.deleted_at?'<span class="flag">🚫 '+(m.from_me?'מחקת את ההודעה הזאת':'נמחקה על ידי השולח')+(m.deleted_at==='unknown'?'':' · '+esc(new Date(m.deleted_at.replace(' ','T')+'Z').toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})))+' · הטקסט נשמר כאן</span>':'')+(m.edited_from?'<span class="flag ed" title="'+esc('לפני העריכה: '+m.edited_from)+'">✏️ נערכה (להצגת המקור: לרחף)</span>':'')+'<span class="t">'+(m.from_me?'':esc(m.sender||'')+' · ')+new Date(m.ts*1000).toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+ticks(m)+'</span></div>').join('')||'<div class="stat">עדיין אין הודעות שמורות לצ\\'אט הזה.</div>';
   if(scroll||atBottom) box.scrollTop=box.scrollHeight; }
 function fmtSize(n){ if(!n) return ''; return n>1048576?(n/1048576).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB'; }
 function bodyText(m){ if(m.media_type&&m.media_type!=='sticker'&&m.body&&m.body.startsWith('[')){ const i=m.body.indexOf(']'); return i>0?m.body.slice(i+1).trim():''; } return m.body||''; }
 function mediaHtml(m){ if(!m.media_type||m.media_type==='sticker') return ''; const url='/api/media/'+encodeURIComponent(m.id); const id=esc(m.id);
   if(m.media_status==='ok'){ const mime=m.media_mime||'';
-    if(mime.startsWith('image/')) return '<img class="mimg" src="'+url+'" onclick="openMedia(\\''+id+'\\')" title="לפתיחה בגודל מלא">';
+    if(mime.startsWith('image/')) return '<img class="mimg" alt="לפתוח את התמונה" src="'+url+'" onclick="openMedia(\\''+id+'\\')" title="לפתיחה בגודל מלא">';
     if(mime.startsWith('audio/')) return '<audio class="maud" controls preload="metadata" src="'+url+'"></audio>';
     if(mime.startsWith('video/')) return '<video class="mvid" controls preload="metadata" src="'+url+'"></video>';
-    const prev=m.media_thumb?'<img class="mdoc" src="'+url+'/thumb" onclick="openMedia(\\''+id+'\\')" title="לפתיחה" onerror="this.remove()">':'';
+    const prev=m.media_thumb?'<img class="mdoc" alt="לפתוח את הקובץ" src="'+url+'/thumb" onclick="openMedia(\\''+id+'\\')" title="לפתיחה" onerror="this.remove()">':'';
     return prev+'<button class="mfile" onclick="openMedia(\\''+id+'\\')">📎 '+esc(m.media_filename||'קובץ')+' <span class="muted">'+fmtSize(m.media_size)+'</span></button>'; }
   const ICONS={image:'🖼️',video:'🎬',ptt:'🎤',audio:'🎵',document:'📎'}; const LBL={image:'תמונה',video:'סרטון',ptt:'הודעה קולית',audio:'קובץ שמע',document:'קובץ'};
   const small=!(m.media_type==='image'||m.media_type==='video'); const bg=m.media_status==='thumb'?'<img src="'+url+'" alt="">':'';
@@ -911,7 +923,7 @@ function spellLearn(id,k){ const el=document.getElementById(id), i=spellCur[id]&
 // clicking a suggestion must not take the focus (and the keyboard, on a phone) away from the text box
 for(const id of Object.values(SPELL)) document.getElementById(id).addEventListener('mousedown',e=>e.preventDefault());
 document.addEventListener('focusout',e=>{ if(SPELL[e.target.id]) spellSoon(e.target,false); });
-document.getElementById('ptext').addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendMsg(); } });
+document.getElementById('ptext').addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); if(e.isComposing||e.keyCode===229) return; sendMsg(); } });
 
 /* ---- מספרים וקישורים ---- */
 let R=null, rtab=localStorage.getItem('rtab')||'all', rOpen={};
