@@ -64,7 +64,7 @@ if (!db.prepare("PRAGMA table_info(media)").all().some((c) => c.name === "thumb"
 }
 // Deleted-for-everyone and edited messages keep their original text; these columns record what happened.
 // A reply (תגובה) keeps the quoted message's id within its chat (WhatsApp's stanza id) and its text as WhatsApp showed it.
-for (const col of ["deleted_at TEXT", "edited_from TEXT", "quoted_stanza TEXT", "quoted_body TEXT"]) {
+for (const col of ["deleted_at TEXT", "edited_from TEXT", "quoted_stanza TEXT", "quoted_body TEXT", "quoted_status TEXT", "quoted_thumb TEXT"]) {
   const name = col.split(" ")[0];
   if (!db.prepare("PRAGMA table_info(messages)").all().some((c) => c.name === name)) db.exec(`ALTER TABLE messages ADD COLUMN ${col}`);
 }
@@ -96,6 +96,10 @@ const stmts = {
   // only ever moves forward (a late "delivered" must not undo "read")
   setAck: db.prepare(`UPDATE messages SET ack = ? WHERE id = ? AND from_me = 1 AND (ack IS NULL OR ack < ?)`),
   setQuote: db.prepare(`UPDATE messages SET quoted_stanza = ?, quoted_body = ? WHERE id = ? AND quoted_body IS NULL`),
+  // a reply to a Status: whose Status ('mine' | 'theirs') and its preview picture
+  setQuoteStatus: db.prepare(`UPDATE messages SET quoted_status = ?, quoted_thumb = ? WHERE id = ? AND quoted_status IS NULL`),
+  // contact cards saved before their name and number were read
+  fixContactBody: db.prepare(`UPDATE messages SET body = ? WHERE id = ? AND body = '[shared a contact]'`),
   markDeleted: db.prepare(`UPDATE messages SET deleted_at = datetime('now') WHERE id = ? AND deleted_at IS NULL`),
   // found already deleted on the page (e.g. deleted while the tracker was off): when it happened is not known
   markDeletedEarlier: db.prepare(`UPDATE messages SET deleted_at = 'unknown' WHERE id = ? AND deleted_at IS NULL`),
@@ -188,6 +192,8 @@ export function saveMessage(m, processed = 0) {
   if (r.changes === 0 && m.mediaType) stmts.setMediaType.run(m.mediaType, m.id); // older rows saved before media support
   if (m.fromMe && m.ack > 0) stmts.setAck.run(m.ack, m.id, m.ack);
   if (m.quote) stmts.setQuote.run(m.quote.stanza, m.quote.body, m.id); // new rows, and older ones saved before replies were kept
+  if (m.quote?.status) stmts.setQuoteStatus.run(m.quote.status, m.quote.thumb ?? null, m.id);
+  if (r.changes === 0 && m.body.startsWith("[איש קשר]")) stmts.fixContactBody.run(m.body, m.id);
   return r.changes > 0;
 }
 export const setAck = (id, ack) => (ack > 0 ? stmts.setAck.run(ack, id, ack).changes : 0);

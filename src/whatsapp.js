@@ -87,14 +87,38 @@ function messageText(msg) {
   if (msg.type === "document") return `[קובץ${msg._data?.filename ? ": " + msg._data.filename : ""}]${caption}`;
   if (msg.type === "sticker") return "[סטיקר]";
   if (msg.type === "location") return "[shared a location]";
-  if (msg.type === "vcard") return "[shared a contact]";
+  if (msg.type === "vcard") return contactText([msg.body]);
+  if (msg.type === "multi_vcard") return contactText((msg._data?.vcardList || []).map((v) => v.vcard).concat(msg.vCards || []));
   return null; // reactions, call logs, etc.
 }
+// A shared contact card (vCard): "[איש קשר] Name · +972 50-123-4567", one line per contact
+function parseVcard(v) {
+  const lines = String(v || "").replace(/\r/g, "").split("\n");
+  const val = (l) => l.slice(l.indexOf(":") + 1).trim();
+  const fn = lines.find((l) => /^FN[:;]/i.test(l));
+  const tels = lines.filter((l) => /^(item\d+\.)?TEL[:;]/i.test(l)).map(val).filter(Boolean);
+  return { name: fn ? val(fn) : "", tels };
+}
+function contactText(vcards) {
+  const seen = new Set();
+  const cards = vcards.map(parseVcard).filter((c) => (c.name || c.tels.length) && !seen.has(c.name + c.tels) && seen.add(c.name + c.tels));
+  if (!cards.length) return "[איש קשר]";
+  return "[איש קשר] " + cards.map((c) => [c.name, ...c.tels].filter(Boolean).join(" · ")).join("\n");
+}
+const jidOf = (w) => (typeof w === "string" ? w : w?._serialized || (w?.user ? `${w.user}@${w.server}` : ""));
 // The message a reply quotes, as WhatsApp ships it with the reply (an image's body there is its thumbnail, so use the caption)
 function quoteOf(msg) {
   const q = msg._data?.quotedMsg;
   if (!msg.hasQuotedMsg || !q) return null;
-  return { stanza: msg._data.quotedStanzaID || null, body: messageText({ type: q.type, body: q.type === "chat" ? q.body : q.caption || "", _data: q }) || "הודעה" };
+  const quote = { stanza: msg._data.quotedStanzaID || null, body: messageText({ type: q.type, body: q.type === "chat" ? q.body : q.caption || "", _data: q }) || "הודעה" };
+  // A reply to a Status (סטטוס): whose Status it was, plus the Status's own tiny preview picture when it had one.
+  // In a private chat, my reply answers their Status and theirs answers mine.
+  if (jidOf(msg._data.quotedRemoteJid) === "status@broadcast") {
+    quote.status = msg.fromMe ? "theirs" : "mine";
+    const raw = q.body;
+    quote.thumb = ["image", "video"].includes(q.type) && typeof raw === "string" && raw.length > 200 && !/\s/.test(raw) ? raw : null;
+  }
+  return quote;
 }
 /** Save a message record plus its preview thumbnail (if any). Returns true when the message is new. */
 export function storeRecord(rec, processed = 0) {
