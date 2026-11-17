@@ -308,6 +308,7 @@ export function startServer(getClient) {
         out.before = look();
         try { await window.require("WAWebForwardMessageFlowLoadable").requireBundle(); out.loaded = true; } catch (e) { out.loadError = e.message; }
         out.after = look();
+        try { out.src = String(window.require("WAWebChatForwardMessage").forwardMessages).slice(0, 1800); } catch {}
         const map = window.require("__debug").modulesMap;
         out.withForwardMessages = Object.keys(map).filter((n) => { try { const m = map[n]?.exports ?? null; return m && typeof m.forwardMessages === "function"; } catch { return false; } });
         out.chatForward = Object.keys(map).filter((n) => /ChatForward|ForwardMessage/i.test(n));

@@ -644,6 +644,12 @@ export async function editMessage(id, text) {
 // Forward (העברה) a message as it is - text, picture, voice note or file - to other chats; WhatsApp marks it "Forwarded".
 export async function forwardMessage(id, chatIds) {
   const msg = await ownMessage(id);
+  // WhatsApp Web now loads its forwarding code only when the forward window is first opened; load it ourselves
+  await current.pupPage.evaluate(async () => {
+    let ready = null;
+    try { ready = window.require("WAWebChatForwardMessage"); } catch {}
+    if (!ready) await window.require("WAWebForwardMessageFlowLoadable").requireBundle();
+  });
   for (const chatId of chatIds) await msg.forward(chatId);
 }
 export async function deleteMessage(id, everyone) {
