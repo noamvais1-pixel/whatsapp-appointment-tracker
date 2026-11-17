@@ -461,7 +461,7 @@ const PAGE = /* html */ `<!doctype html>
      Not on text boxes: there WebKit leaves the cursor at the left edge while English is typed (setDir handles them) */
   .b .tx{unicode-bidi:plaintext;text-align:start}
   .b.hl{outline:2px solid var(--accent)}
-  .b{position:relative;padding-inline-end:28px}.b .mact{position:absolute;top:2px;inset-inline-end:4px;padding:0 7px;font-size:14px;line-height:18px;opacity:0;background:rgba(255,255,255,.85)}.b:hover .mact{opacity:1}
+  .b{position:relative;padding-inline-end:28px}.b .mact{position:absolute;top:2px;inset-inline-end:4px;padding:0 7px;font-size:14px;line-height:18px;opacity:.45;background:rgba(255,255,255,.85)}.b:hover .mact,.b .mact:focus-visible{opacity:1}@media (hover:none){.b .mact{opacity:.85}}
   .mmenu{position:fixed;z-index:50;display:flex;flex-direction:column;gap:2px;padding:6px;border-radius:14px;background:rgba(255,255,255,.95);box-shadow:var(--shadow);border:1px solid rgba(0,0,0,.08)}.mmenu button{text-align:start;border-radius:9px}
   .fwd{width:min(400px,calc(100% - 32px));max-height:min(560px,calc(100vh - 32px));padding:14px;border:0;border-radius:var(--r);background:rgba(255,255,255,.97);color:var(--ink);box-shadow:var(--shadow)}
   .fwd[open]{display:flex;flex-direction:column;gap:8px}.fwd:modal{overscroll-behavior:contain}
@@ -746,8 +746,10 @@ function msgMenu(e){ e.stopPropagation(); const id=e.target.closest('.b').datase
   opts.push(['מחיקה רק אצלי',()=>delMsg(m,false)]);
   const menu=document.createElement('div'); menu.id='mmenu'; menu.className='mmenu';
   for(const [label,fn] of opts){ const b=document.createElement('button'); b.textContent=label; b.onclick=()=>{ closeMsgMenu(); fn(); }; menu.appendChild(b); }
-  document.body.appendChild(menu); const r=e.target.getBoundingClientRect();
+  document.body.appendChild(menu); const r=e.type==='contextmenu'?{bottom:e.clientY,left:e.clientX}:e.target.getBoundingClientRect();
   menu.style.top=Math.min(r.bottom+4,innerHeight-menu.offsetHeight-8)+'px'; menu.style.left=Math.max(8,Math.min(r.left,innerWidth-menu.offsetWidth-8))+'px'; }
+// right-click a message: the same menu (reply, forward, …) as its ⋯ button; links and selected text keep the normal menu
+document.getElementById('pmsgs').addEventListener('contextmenu',e=>{ const b=e.target.closest('.b'); if(!b||e.target.closest('a')||String(getSelection())) return; e.preventDefault(); msgMenu(e); });
 // ticks on my messages, as in WhatsApp: ✓ sent, ✓✓ grey delivered, ✓✓ blue read. Click them for who read it.
 function ticks(m){ if(!m.from_me||m.deleted_at) return '';
   const a=m.ack||0, t=a>=3?['✓✓','rd','נקראה']:a===2?['✓✓','','נמסרה, עדיין לא נקראה']:a===1?['✓','','נשלחה, עדיין לא נמסרה']:['🕓','','ממתינה לשליחה'];
