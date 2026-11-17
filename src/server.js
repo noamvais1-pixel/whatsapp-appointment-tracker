@@ -306,6 +306,10 @@ export function startServer(getClient) {
         const out = {};
         try { const m = window.require("WAWebChatForwardMessage"); out.module = Object.keys(m); out.src = String(m.forwardMessages || "").slice(0, 1500); } catch (e) { out.moduleError = e.message; }
         out.helper = typeof window.WWebJS?.forwardMessage;
+        try {
+          const map = window.require("__debug").modulesMap; const names = Object.keys(map).filter((n) => /forward/i.test(n));
+          out.candidates = names.map((n) => { let ex = null; try { const m = window.require(n); ex = m ? Object.keys(m).filter((k) => typeof m[k] === "function").slice(0, 15) : null; } catch (e) { ex = "err " + e.message; } return [n, ex]; });
+        } catch (e) { out.searchError = e.message; }
         return out;
       }));
     } catch (e) { res.status(500).json({ error: e.message }); }
