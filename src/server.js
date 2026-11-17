@@ -302,14 +302,15 @@ export function startServer(getClient) {
   app.get("/api/debug/forward-check", async (req, res) => {
     try {
       const page = getClient?.()?.pupPage;
-      res.json(await page.evaluate(() => {
+      res.json(await page.evaluate(async () => {
         const out = {};
-        try { const m = window.require("WAWebChatForwardMessage"); out.module = Object.keys(m); out.src = String(m.forwardMessages || "").slice(0, 1500); } catch (e) { out.moduleError = e.message; }
-        out.helper = typeof window.WWebJS?.forwardMessage;
-        try {
-          const map = window.require("__debug").modulesMap; const names = Object.keys(map).filter((n) => /forward/i.test(n));
-          out.candidates = names.map((n) => { let ex = null; try { const m = window.require(n); ex = m ? Object.keys(m).filter((k) => typeof m[k] === "function").slice(0, 15) : null; } catch (e) { ex = "err " + e.message; } return [n, ex]; });
-        } catch (e) { out.searchError = e.message; }
+        const look = () => { try { const m = window.require("WAWebChatForwardMessage"); return m ? Object.keys(m) : null; } catch (e) { return "err " + e.message; } };
+        out.before = look();
+        try { await window.require("WAWebForwardMessageFlowLoadable").requireBundle(); out.loaded = true; } catch (e) { out.loadError = e.message; }
+        out.after = look();
+        const map = window.require("__debug").modulesMap;
+        out.withForwardMessages = Object.keys(map).filter((n) => { try { const m = map[n]?.exports ?? null; return m && typeof m.forwardMessages === "function"; } catch { return false; } });
+        out.chatForward = Object.keys(map).filter((n) => /ChatForward|ForwardMessage/i.test(n));
         return out;
       }));
     } catch (e) { res.status(500).json({ error: e.message }); }
