@@ -293,7 +293,22 @@ export function startServer(getClient) {
       for (const c of to) store.closeNoReply(c, "you forwarded a message from the dashboard");
       console.log(`[send] forwarded ${req.params.id} -> ${to.join(", ")}`);
       res.json({ ok: true });
-    } catch (e) { res.status(e.code || 500).json({ error: String(e.message).slice(0, 200) }); }
+    } catch (e) {
+      console.error(`[send] forward of ${req.params.id} failed: ${String(e.stack || e.message).slice(0, 600)}`);
+      res.status(e.code || 500).json({ error: String(e.message).slice(0, 200) });
+    }
+  });
+  // Diagnostic: is WhatsApp Web's forward function where the library expects it? Sends nothing. Local only.
+  app.get("/api/debug/forward-check", async (req, res) => {
+    try {
+      const page = getClient?.()?.pupPage;
+      res.json(await page.evaluate(() => {
+        const out = {};
+        try { const m = window.require("WAWebChatForwardMessage"); out.module = Object.keys(m); out.src = String(m.forwardMessages || "").slice(0, 1500); } catch (e) { out.moduleError = e.message; }
+        out.helper = typeof window.WWebJS?.forwardMessage;
+        return out;
+      }));
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   // Disconnect the current phone and show a QR code for another one.
