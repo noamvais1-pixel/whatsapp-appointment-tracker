@@ -237,5 +237,13 @@
   [" · מכווץ ", " · zipping "],
   ["קבצים…", "files…"],
   ["רגע, הקובץ עוד בהכנה", "One moment, the file is still being prepared"],
-  ["תיקייה", "folder"]
+  ["תיקייה", "folder"],
+  ["☑️ בחירת כמה הודעות להעברה", "☑️ Select several messages to forward"],
+  ["נבחרה הודעה אחת · לחיצה על הודעות נוספות כדי לבחור", "1 message selected · click more messages to add them"],
+  ["הודעות", "messages"],
+  ["נבחרו ", "Selected: "],
+  ["אפשר לבחור עד 30 הודעות בבת אחת", "You can select up to 30 messages at a time"],
+  ["אחת ההודעות כבר לא נמצאת ב-WhatsApp, אי אפשר להעביר אותה.", "One of the messages is no longer in WhatsApp, so it can’t be forwarded."],
+  [" (הספקתי להעביר ", " (forwarded "],
+  [" מתוך ", " of "]
 ]

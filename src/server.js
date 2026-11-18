@@ -2,7 +2,7 @@ import express from "express";
 import { config, ROOT } from "./config.js";
 import { installAuth, authEnabled } from "./auth.js";
 import * as store from "./db.js";
-import { state, relink, runBackfill, listChats, phoneFor, resolvePhones, editMessage, deleteMessage, forwardMessage, messageInfo } from "./whatsapp.js";
+import { state, relink, runBackfill, listChats, phoneFor, resolvePhones, editMessage, deleteMessage, forwardMessage, forwardMessages, messageInfo } from "./whatsapp.js";
 import { buildDigest, localDateKey } from "./digest.js";
 import { summary } from "./status.js";
 import { syncCalendar, calState, inCalendar } from "./calendar.js";
@@ -312,6 +312,23 @@ export function startServer(getClient) {
       res.status(e.code || 500).json({ error: String(e.message).slice(0, 200) });
     }
   });
+  // Forward several messages (in the order given) to up to 5 chats. Body: { ids: [msgId, ...], to: [chatId, ...] }
+  app.post("/api/messages/forward", async (req, res) => {
+    const ids = [...new Set(Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [])];
+    const to = [...new Set(Array.isArray(req.body?.to) ? req.body.to.map(String) : [])];
+    if (!ids.length || ids.length > 30) return res.status(400).json({ error: "choose 1-30 messages" });
+    if (!to.length || to.length > 5) return res.status(400).json({ error: "choose 1-5 chats" });
+    const progress = {};
+    try {
+      await forwardMessages(ids, to, progress);
+      for (const c of to) store.closeNoReply(c, "you forwarded messages from the dashboard");
+      console.log(`[send] forwarded ${ids.length} messages -> ${to.join(", ")}`);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error(`[send] forward of ${ids.length} messages failed after ${progress.done || 0}: ${String(e.stack || e.message).slice(0, 600)}`);
+      res.status(e.code || 500).json({ error: String(e.message).slice(0, 200), done: progress.done || 0, total: ids.length * to.length });
+    }
+  });
   // Diagnostic: is WhatsApp Web's forward function where the library expects it? Sends nothing. Local only.
   app.get("/api/debug/forward-check", async (req, res) => {
     try {
@@ -502,6 +519,8 @@ const PAGE = /* html */ `<!doctype html>
   .b .tx{unicode-bidi:plaintext;text-align:start}
   .b.hl{outline:2px solid var(--accent)}
   .b{position:relative;padding-inline-end:28px}.b .mact{position:absolute;top:2px;inset-inline-end:4px;padding:0 7px;font-size:14px;line-height:18px;opacity:.45;background:rgba(255,255,255,.85)}.b:hover .mact,.b .mact:focus-visible{opacity:1}@media (hover:none){.b .mact{opacity:.85}}
+  .b.sel{outline:2px solid var(--accent);background-image:linear-gradient(rgba(0,120,255,.12),rgba(0,120,255,.12))}.msgs.selmode .b{cursor:pointer}.msgs.selmode .b .mact{display:none}
+  .selbar{display:flex;align-items:center;gap:8px;margin:8px 12px 0;padding:6px 10px;border-radius:10px;background:rgba(0,0,0,.05);font-size:13px}.selbar .nm{flex:1}.selbar[hidden]{display:none}
   .mmenu{position:fixed;z-index:50;display:flex;flex-direction:column;gap:2px;padding:6px;border-radius:14px;background:rgba(255,255,255,.95);box-shadow:var(--shadow);border:1px solid rgba(0,0,0,.08)}.mmenu button{text-align:start;border-radius:9px}
   .fwd{width:min(400px,calc(100% - 32px));max-height:min(560px,calc(100vh - 32px));padding:14px;border:0;border-radius:var(--r);background:rgba(255,255,255,.97);color:var(--ink);box-shadow:var(--shadow)}
   .fwd[open]{display:flex;flex-direction:column;gap:8px}.fwd:modal{overscroll-behavior:contain}
@@ -663,7 +682,7 @@ const PAGE = /* html */ `<!doctype html>
 </main>
 <div id="panel"><div class="ph"><b id="pname"><span id="pname-t"></span><span class="pn" id="pphone"></span></b><span id="pstatus" class="stat"></span><button onclick="closeChat()">סגירה</button></div>
 <div class="msgs" id="pmsgs"></div><div class="sent" id="psent" role="status"></div>
-<div class="replybar" id="preply" hidden></div><div class="attach" id="pattach" hidden></div>
+<div class="selbar" id="pselbar" hidden><span class="nm" id="pseln"></span><button class="primary" onclick="fwdSelected()">↪️ העברה</button><button onclick="endSelect()">ביטול</button></div><div class="replybar" id="preply" hidden></div><div class="attach" id="pattach" hidden></div>
 <div class="spell" id="pspell" hidden></div>
 <div class="compose"><button class="clip" title="לצרף תמונה או קובץ" aria-label="לצרף תמונה או קובץ" onclick="document.getElementById('pfile').click()">📎</button><input type="file" id="pfile" hidden onchange="pickFile(this.files[0]); this.value=''"><button class="clip" title="לצרף תיקייה (נשלחת כקובץ zip)" aria-label="לצרף תיקייה" onclick="document.getElementById('pdir').click()">📁</button><input type="file" id="pdir" hidden webkitdirectory onchange="pickDir(this.files); this.value=''"><button class="clip" id="pmic" title="להקליט הודעה קולית" aria-label="להקליט הודעה קולית" onclick="toggleRec()">🎤</button><textarea id="ptext" aria-label="הודעה" enterkeyhint="send" spellcheck="true" placeholder="לכתוב הודעה… (Enter לשליחה, Shift+Enter לשורה חדשה)"></textarea><button class="primary" onclick="sendMsg()">שליחה</button></div></div>
 <dialog class="fwd" id="fwd" closedby="any" aria-labelledby="fwdTitle"><b id="fwdTitle">↪️ העברה ל…</b><div class="what" id="fwdwhat"></div><input id="fwdq" type="search" aria-label="חיפוש צ'אט או קבוצה" spellcheck="false" autocorrect="off" placeholder="חיפוש צ'אט או קבוצה…" oninput="renderFwd()"><div class="cl" id="fwdlist"></div><div class="row"><span class="n" id="fwdn">אפשר לבחור עד 5 צ'אטים</span><button onclick="closeFwd()">ביטול</button><button class="primary" id="fwdgo" onclick="doFwd()" disabled>העברה</button></div></dialog>
@@ -771,7 +790,7 @@ async function startChatByNumber(num){ let r, j; try{ r=await fetch('/api/chats/
 async function openChatById(chatId){ const c=chats.find(x=>x.id===chatId); await showChat({chatId, name:c?c.name:chatId, msgId:null}); renderChats(); }
 async function openChat(itemId){ const it=S.items.find(i=>i.id===itemId); if(!it||!it.chat_id){ alert('הפריט הזה לא מקושר לצ\\'אט.'); return; }
   await showChat({chatId:it.chat_id,name:it.chat_name||it.who||it.chat_id,msgId:it.source_msg_id}); }
-async function showChat(c){ if(cur?.chatId!==c.chatId) clearReply(); cur=c; const panel=document.getElementById('panel');
+async function showChat(c){ if(cur?.chatId!==c.chatId){ clearReply(); endSelect(); } cur=c; const panel=document.getElementById('panel');
   if(isChatView(view)&&panel.parentElement===document.body){ const slot=document.getElementById('cslot'); if(slot) slot.replaceWith(panel); }
   document.getElementById('pname-t').textContent=cur.name; document.getElementById('pphone').textContent=''; document.getElementById('pmsgs').innerHTML='<div class="stat">טוען…</div>';
   panel.classList.add('open'); await loadChat(true); clearInterval(ptimer); ptimer=setInterval(()=>loadChat(false),8000); document.getElementById('ptext').focus(); }
@@ -779,7 +798,7 @@ async function showChat(c){ if(cur?.chatId!==c.chatId) clearReply(); cur=c; cons
 let pmsgs={};
 function msgMenu(e){ e.stopPropagation(); const id=e.target.closest('.b').dataset.id, m=pmsgs[id]; if(!m) return; closeMsgMenu();
   const age=Date.now()/1000-m.ts, opts=[];
-  if(!m.deleted_at) opts.push(['↩️ תגובה',()=>replyMsg(m)],['↪️ העברה',()=>fwdMsg(m)]);
+  if(!m.deleted_at) opts.push(['↩️ תגובה',()=>replyMsg(m)],['↪️ העברה',()=>fwdMsg(m)],['☑️ בחירת כמה הודעות להעברה',()=>startSelect(m)]);
   if(m.from_me&&!m.deleted_at) opts.push(['👁 מי קרא',()=>readInfo(m)]);
   if(m.from_me&&!m.deleted_at&&!m.media_type&&age<15*60) opts.push(['✏️ עריכה',()=>editMsg(m)]);
   if(m.from_me&&!m.deleted_at&&age<60*3600) opts.push(['🗑 מחיקה אצל כולם',()=>delMsg(m,true)]);
@@ -820,9 +839,23 @@ function quoteHtml(m,all){ if(!m.quoted_body) return ''; if(m.quoted_status) ret
 function jumpToMsg(el){ const s=el.dataset.stanza; const b=[...document.querySelectorAll('#pmsgs .b')].find(x=>x.dataset.id.endsWith('_'+s));
   if(!b){ alert('ההודעה המקורית ישנה מדי ולא מוצגת כאן.'); return; } b.scrollIntoView({block:'center',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'}); b.classList.add('hl'); setTimeout(()=>b.classList.remove('hl'),1600); }
 // forward (העברה): send this message - text, picture, voice note or file - to up to 5 other chats
+// choose several messages (☑️ in a message's menu), then forward them all together, in chat order
+let selIds=new Set();
+function startSelect(m){ selIds=new Set([m.id]); document.getElementById('pmsgs').classList.add('selmode'); paintSel(); }
+function endSelect(){ if(!selIds.size&&document.getElementById('pselbar').hidden) return; selIds=new Set(); document.getElementById('pmsgs').classList.remove('selmode'); paintSel(); }
+function paintSel(){ for(const b of document.querySelectorAll('#pmsgs .b')) b.classList.toggle('sel',selIds.has(b.dataset.id));
+  const bar=document.getElementById('pselbar'), on=document.getElementById('pmsgs').classList.contains('selmode'); bar.hidden=!on;
+  const n=selIds.size; document.getElementById('pseln').textContent=n===1?'נבחרה הודעה אחת · לחיצה על הודעות נוספות כדי לבחור':'נבחרו '+n+' הודעות'+(n>=30?' (המקסימום)':''); bar.querySelector('.primary').disabled=!n; }
+document.getElementById('pmsgs').addEventListener('click',e=>{ if(!document.getElementById('pmsgs').classList.contains('selmode')) return; const b=e.target.closest('.b'); if(!b) return;
+  e.preventDefault(); e.stopPropagation(); const id=b.dataset.id, m=pmsgs[id]; if(!m||m.deleted_at) return;
+  if(selIds.has(id)) selIds.delete(id); else if(selIds.size<30) selIds.add(id); else { alert('אפשר לבחור עד 30 הודעות בבת אחת'); return; } paintSel(); },true);
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&selIds.size&&!document.getElementById('fwd').open) endSelect(); });
+function fwdSelected(){ const order=Object.keys(pmsgs), ids=order.filter(id=>selIds.has(id)); if(!ids.length) return;
+  if(ids.length===1){ fwdMsg(pmsgs[ids[0]]); return; } openFwd(ids,ids.length+' הודעות'); }
 let fwd=null;
-async function fwdMsg(m){ fwd={m,sel:new Set()}; document.getElementById('fwdq').value=''; const k=m.media_type?{image:'📷 תמונה',audio:'🎤 הודעה קולית',ptt:'🎤 הודעה קולית',video:'🎬 סרטון',sticker:'מדבקה',document:'📄 קובץ'}[m.media_type]||'📎 קובץ':'';
-  const t=bodyText(m); document.getElementById('fwdwhat').textContent=[k,t&&msgSnippet(t)].filter(Boolean).join(' · ');
+function fwdMsg(m){ const k=m.media_type?{image:'📷 תמונה',audio:'🎤 הודעה קולית',ptt:'🎤 הודעה קולית',video:'🎬 סרטון',sticker:'מדבקה',document:'📄 קובץ'}[m.media_type]||'📎 קובץ':'';
+  const t=bodyText(m); openFwd([m.id],[k,t&&msgSnippet(t)].filter(Boolean).join(' · ')); }
+async function openFwd(ids,what){ fwd={ids,sel:new Set()}; document.getElementById('fwdq').value=''; document.getElementById('fwdwhat').textContent=what;
   document.getElementById('fwd').showModal(); renderFwd(); document.getElementById('fwdq').focus();
   if(!chats.length){ try{ chats=await (await fetch('/api/chats')).json(); }catch{} if(fwd) renderFwd(); } }
 function renderFwd(){ if(!fwd) return; const q=(document.getElementById('fwdq').value||'').trim().toLowerCase(), qd=q.replace(/\\D/g,'').replace(/^0/,'');
@@ -834,12 +867,12 @@ function closeFwd(){ fwd=null; const d=document.getElementById('fwd'); if(d.open
 // Esc, the back gesture and clicking outside close the native dialog; reset the state whichever way it closed
 document.getElementById('fwd').addEventListener('close',()=>{ fwd=null; });
 if(!('closedBy' in HTMLDialogElement.prototype)){ const d=document.getElementById('fwd'), out=e=>{ const r=d.getBoundingClientRect(); return e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom; }; let po=false; d.addEventListener('pointerdown',e=>{ po=out(e); }); d.addEventListener('pointerup',e=>{ if(po&&out(e)) d.close(); }); }
-async function doFwd(){ if(!fwd||!fwd.sel.size) return; const {m,sel}=fwd, go=document.getElementById('fwdgo'); go.disabled=true; go.textContent='מעביר…'; let r,j;
-  try{ r=await fetch('/api/messages/'+encodeURIComponent(m.id)+'/forward',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({to:[...sel]})}); j=await r.json().catch(()=>({})); }catch{ r=null; }
+async function doFwd(){ if(!fwd||!fwd.sel.size) return; const {ids,sel}=fwd, many=ids.length>1, go=document.getElementById('fwdgo'); go.disabled=true; go.textContent='מעביר…'; let r,j;
+  try{ r=await fetch(many?'/api/messages/forward':'/api/messages/'+encodeURIComponent(ids[0])+'/forward',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(many?{ids,to:[...sel]}:{to:[...sel]})}); j=await r.json().catch(()=>({})); }catch{ r=null; }
   go.textContent='העברה';
   if(!r){ go.disabled=false; alert('אין תשובה מהתוכנה'); return; }
-  if(!r.ok){ go.disabled=false; alert(r.status===409?'WhatsApp לא מחובר כרגע':r.status===404?'ההודעה כבר לא נמצאת ב-WhatsApp, אי אפשר להעביר אותה.':'ההעברה נכשלה: '+(j.error||r.status)); return; }
-  closeFwd(); document.getElementById('psent').textContent='הועבר ✓'; setTimeout(()=>document.getElementById('psent').textContent='',2500); setTimeout(load,1500); }
+  if(!r.ok){ go.disabled=false; const part=many&&j.done?' (הספקתי להעביר '+j.done+' מתוך '+j.total+')':''; alert((r.status===409?'WhatsApp לא מחובר כרגע':r.status===404?(many?'אחת ההודעות כבר לא נמצאת ב-WhatsApp, אי אפשר להעביר אותה.':'ההודעה כבר לא נמצאת ב-WhatsApp, אי אפשר להעביר אותה.'):'ההעברה נכשלה: '+(j.error||r.status))+part); return; }
+  closeFwd(); if(many) endSelect(); document.getElementById('psent').textContent='הועבר ✓'; setTimeout(()=>document.getElementById('psent').textContent='',2500); setTimeout(load,1500); }
 // Clickable non-button elements (chat rows, ✕ on reply/attachment, quoted message, read ticks, task titles, media):
 // make them focusable buttons for keyboard and screen-reader users. Enter acts on keydown, Space on keyup, like a <button>.
 function kbdify(root){ for(const el of (root||document).querySelectorAll('[onclick]:not(button,a,input,select,textarea,label,dialog)')){ if(el.hasAttribute('role')) continue; el.setAttribute('role','button'); el.tabIndex=0; if(el.title&&!el.hasAttribute('aria-label')&&el.tagName!=='IMG'&&el.textContent.trim().length<3) el.setAttribute('aria-label',el.title); } }
@@ -865,7 +898,7 @@ async function loadChat(scroll){ if(!cur) return; const id=cur.chatId; let d; tr
   if(!scroll&&sig===box.dataset.sig) return;
   box.dataset.sig=sig;
   pmsgs={}; for(const m of d.messages) pmsgs[m.id]=m; { const c=chats.find(x=>x.id===cur.chatId); if(c&&c.unread){ c.unread=0; if(isChatView(view)) renderChats(); } }
-  box.innerHTML=d.messages.map(m=>'<div class="b '+(m.from_me?'me':'')+(m.id===cur.msgId?' hl':'')+(m.deleted_at?' del':'')+'" data-id="'+esc(m.id)+'"><button class="mact" onclick="msgMenu(event)" title="תגובה, העברה, עריכה או מחיקה" aria-label="פעולות להודעה">⋯</button>'+quoteHtml(m,d.messages)+mediaHtml(m)+contactHtml(m)+(bodyText(m)?'<div class="tx">'+esc(bodyText(m))+'</div>':'')+(m.deleted_at?'<span class="flag">🚫 '+(m.from_me?'מחקת את ההודעה הזאת':'נמחקה על ידי השולח')+(m.deleted_at==='unknown'?'':' · '+esc(new Date(m.deleted_at.replace(' ','T')+'Z').toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})))+' · הטקסט נשמר כאן</span>':'')+(m.edited_from?'<span class="flag ed" title="'+esc('לפני העריכה: '+m.edited_from)+'">✏️ נערכה (להצגת המקור: לרחף)</span>':'')+'<span class="t">'+(m.from_me?'':esc(m.sender||'')+' · ')+new Date(m.ts*1000).toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+ticks(m)+'</span></div>').join('')||'<div class="stat">עדיין אין הודעות שמורות לצ\\'אט הזה.</div>';
+  box.innerHTML=d.messages.map(m=>'<div class="b '+(m.from_me?'me':'')+(m.id===cur.msgId?' hl':'')+(m.deleted_at?' del':'')+(selIds.has(m.id)?' sel':'')+'" data-id="'+esc(m.id)+'"><button class="mact" onclick="msgMenu(event)" title="תגובה, העברה, עריכה או מחיקה" aria-label="פעולות להודעה">⋯</button>'+quoteHtml(m,d.messages)+mediaHtml(m)+contactHtml(m)+(bodyText(m)?'<div class="tx">'+esc(bodyText(m))+'</div>':'')+(m.deleted_at?'<span class="flag">🚫 '+(m.from_me?'מחקת את ההודעה הזאת':'נמחקה על ידי השולח')+(m.deleted_at==='unknown'?'':' · '+esc(new Date(m.deleted_at.replace(' ','T')+'Z').toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})))+' · הטקסט נשמר כאן</span>':'')+(m.edited_from?'<span class="flag ed" title="'+esc('לפני העריכה: '+m.edited_from)+'">✏️ נערכה (להצגת המקור: לרחף)</span>':'')+'<span class="t">'+(m.from_me?'':esc(m.sender||'')+' · ')+new Date(m.ts*1000).toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+ticks(m)+'</span></div>').join('')||'<div class="stat">עדיין אין הודעות שמורות לצ\\'אט הזה.</div>';
   if(scroll||atBottom) box.scrollTop=box.scrollHeight; }
 function fmtSize(n){ if(!n) return ''; return n>1048576?(n/1048576).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB'; }
 // a shared contact card: name, number, and a button that opens a chat with that number
