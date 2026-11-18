@@ -226,5 +226,16 @@
   ["לא פועל כרגע", "Not running right now"],
   ["לא מחובר עדיין", "Not connected yet"],
   ["(כבוי)", "(off)"],
-  ["(לא מחובר)", "(not connected)"]
+  ["(לא מחובר)", "(not connected)"],
+  ["לצרף תיקייה (נשלחת כקובץ zip)", "Attach a folder (sent as a zip file)"],
+  ["לצרף תיקייה", "Attach a folder"],
+  ["התיקייה ריקה", "The folder is empty"],
+  ["התיקייה גדולה מדי לשליחה", "The folder is too big to send"],
+  ["גם אחרי הכיווץ התיקייה גדולה מ-45MB. אפשר לשלוח אותה בכמה חלקים.", "Even zipped, the folder is over 45MB. Try sending it in a few parts."],
+  ["לא הצלחתי לכווץ את התיקייה", "Couldn’t zip the folder"],
+  ["לא הצלחתי לקרוא את התיקייה", "Couldn’t read the folder"],
+  [" · מכווץ ", " · zipping "],
+  ["קבצים…", "files…"],
+  ["רגע, הקובץ עוד בהכנה", "One moment, the file is still being prepared"],
+  ["תיקייה", "folder"]
 ]

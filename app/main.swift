@@ -110,9 +110,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
     // File picker for the attach button (WKWebView needs the host app to show the panel).
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
         let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
+        // The 📁 button asks for a folder (webkitdirectory); WebKit then lists the files inside it for the page.
+        panel.canChooseFiles = !parameters.allowsDirectories
+        panel.canChooseDirectories = parameters.allowsDirectories
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
         panel.beginSheetModal(for: window) { resp in
             completionHandler(resp == .OK ? panel.urls : nil)
         }

@@ -665,7 +665,7 @@ const PAGE = /* html */ `<!doctype html>
 <div class="msgs" id="pmsgs"></div><div class="sent" id="psent" role="status"></div>
 <div class="replybar" id="preply" hidden></div><div class="attach" id="pattach" hidden></div>
 <div class="spell" id="pspell" hidden></div>
-<div class="compose"><button class="clip" title="לצרף תמונה או קובץ" aria-label="לצרף תמונה או קובץ" onclick="document.getElementById('pfile').click()">📎</button><input type="file" id="pfile" hidden onchange="pickFile(this.files[0]); this.value=''"><button class="clip" id="pmic" title="להקליט הודעה קולית" aria-label="להקליט הודעה קולית" onclick="toggleRec()">🎤</button><textarea id="ptext" aria-label="הודעה" enterkeyhint="send" spellcheck="true" placeholder="לכתוב הודעה… (Enter לשליחה, Shift+Enter לשורה חדשה)"></textarea><button class="primary" onclick="sendMsg()">שליחה</button></div></div>
+<div class="compose"><button class="clip" title="לצרף תמונה או קובץ" aria-label="לצרף תמונה או קובץ" onclick="document.getElementById('pfile').click()">📎</button><input type="file" id="pfile" hidden onchange="pickFile(this.files[0]); this.value=''"><button class="clip" title="לצרף תיקייה (נשלחת כקובץ zip)" aria-label="לצרף תיקייה" onclick="document.getElementById('pdir').click()">📁</button><input type="file" id="pdir" hidden webkitdirectory onchange="pickDir(this.files); this.value=''"><button class="clip" id="pmic" title="להקליט הודעה קולית" aria-label="להקליט הודעה קולית" onclick="toggleRec()">🎤</button><textarea id="ptext" aria-label="הודעה" enterkeyhint="send" spellcheck="true" placeholder="לכתוב הודעה… (Enter לשליחה, Shift+Enter לשורה חדשה)"></textarea><button class="primary" onclick="sendMsg()">שליחה</button></div></div>
 <dialog class="fwd" id="fwd" closedby="any" aria-labelledby="fwdTitle"><b id="fwdTitle">↪️ העברה ל…</b><div class="what" id="fwdwhat"></div><input id="fwdq" type="search" aria-label="חיפוש צ'אט או קבוצה" spellcheck="false" autocorrect="off" placeholder="חיפוש צ'אט או קבוצה…" oninput="renderFwd()"><div class="cl" id="fwdlist"></div><div class="row"><span class="n" id="fwdn">אפשר לבחור עד 5 צ'אטים</span><button onclick="closeFwd()">ביטול</button><button class="primary" id="fwdgo" onclick="doFwd()" disabled>העברה</button></div></dialog>
 <script>
 const ICON={meeting:'📅',call:'📞',follow_up:'✅'};
@@ -902,14 +902,38 @@ function pickFile(file){ if(!file||!cur) return; if(file.size>45*1024*1024){ ale
     try{ const rs=await fetch('/api/preview',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:mine.name,data:mine.data})}); if(rs.ok){ const b=await rs.blob(); if(pending===mine) mine.previewUrl=URL.createObjectURL(b); } }catch{}
     if(!mine.previewUrl&&mime.startsWith('image/')) mine.previewUrl=URL.createObjectURL(file);
     mine.loading=false; if(pending===mine) renderAttach(); }; r.readAsDataURL(file); }
+// Folders: WhatsApp sends files only, so a folder is packed into one .zip here and attached like any file.
+const CRC_T=(()=>{ const t=new Uint32Array(256); for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=c&1?0xEDB88320^(c>>>1):c>>>1; t[n]=c>>>0; } return t; })();
+function crc32(b){ let c=0xFFFFFFFF; for(let i=0;i<b.length;i++) c=CRC_T[(c^b[i])&255]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }
+async function deflateRaw(b){ if(typeof CompressionStream==='undefined') return null; try{ const s=new Blob([b]).stream().pipeThrough(new CompressionStream('deflate-raw')); return new Uint8Array(await new Response(s).arrayBuffer()); }catch{ return null; } }
+async function zipFiles(list){ const enc=new TextEncoder(), parts=[], cd=[]; let off=0;
+  for(const it of list){ const data=new Uint8Array(await it.file.arrayBuffer()), name=enc.encode(it.path), crc=crc32(data); let body=await deflateRaw(data), method=8; if(!body||body.length>=data.length){ body=data; method=0; }
+    const d=new Date(it.file.lastModified||Date.now()), time=(d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1), date=((Math.max(d.getFullYear(),1980)-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate();
+    const h=new DataView(new ArrayBuffer(30)); h.setUint32(0,0x04034b50,true); h.setUint16(4,20,true); h.setUint16(6,0x0800,true); h.setUint16(8,method,true); h.setUint16(10,time,true); h.setUint16(12,date,true); h.setUint32(14,crc,true); h.setUint32(18,body.length,true); h.setUint32(22,data.length,true); h.setUint16(26,name.length,true);
+    const c=new DataView(new ArrayBuffer(46)); c.setUint32(0,0x02014b50,true); c.setUint16(4,20,true); c.setUint16(6,20,true); c.setUint16(8,0x0800,true); c.setUint16(10,method,true); c.setUint16(12,time,true); c.setUint16(14,date,true); c.setUint32(16,crc,true); c.setUint32(20,body.length,true); c.setUint32(24,data.length,true); c.setUint16(28,name.length,true); c.setUint32(42,off,true);
+    parts.push(h,name,body); cd.push(c,name); off+=30+name.length+body.length; }
+  const cdSize=cd.reduce((s,x)=>s+x.byteLength,0), e=new DataView(new ArrayBuffer(22)); e.setUint32(0,0x06054b50,true); e.setUint16(8,list.length,true); e.setUint16(10,list.length,true); e.setUint32(12,cdSize,true); e.setUint32(16,off,true);
+  return new Blob([...parts,...cd,e],{type:'application/zip'}); }
+async function pickFolder(folder,list){ if(!cur) return; list=list.filter(it=>!it.path.split('/').some(p=>p.startsWith('.')));
+  if(!list.length){ alert('התיקייה ריקה'); return; }
+  const total=list.reduce((s,it)=>s+it.file.size,0); if(total>300*1024*1024){ alert('התיקייה גדולה מדי לשליחה'); return; }
+  const mine={name:(folder||'תיקייה')+'.zip', mimetype:'application/zip', data:null, previewUrl:null, size:total, loading:true, loadingText:' · מכווץ '+list.length+' קבצים…'}; pending=mine; renderAttach();
+  try{ const blob=await zipFiles(list); if(pending!==mine) return;
+    if(blob.size>45*1024*1024){ clearAttach(); alert('גם אחרי הכיווץ התיקייה גדולה מ-45MB. אפשר לשלוח אותה בכמה חלקים.'); return; }
+    const fr=new FileReader(); fr.onload=()=>{ if(pending!==mine) return; mine.data=String(fr.result).split(',')[1]; mine.size=blob.size; mine.loading=false; renderAttach(); document.getElementById('ptext').focus(); }; fr.readAsDataURL(blob);
+  }catch(err){ if(pending===mine) clearAttach(); alert('לא הצלחתי לכווץ את התיקייה'); } }
+function pickDir(files){ const list=[...files].map(f=>({path:f.webkitRelativePath||f.name,file:f})); if(!list.length) return; pickFolder(list[0].path.split('/')[0],list); }
+async function walkEntry(entry,prefix,out){ if(entry.isFile){ out.push({path:prefix+entry.name,file:await new Promise((ok,no)=>entry.file(ok,no))}); return; }
+  const rd=entry.createReader(); for(;;){ const batch=await new Promise((ok,no)=>rd.readEntries(ok,no)); if(!batch.length) break; for(const x of batch) await walkEntry(x,prefix+entry.name+'/',out); } }
+async function dropFolder(entry){ const out=[]; try{ await walkEntry(entry,'',out); }catch{ alert('לא הצלחתי לקרוא את התיקייה'); return; } pickFolder(entry.name,out); }
 function fileIcon(mime,name){ const e=(name||'').split('.').pop().toLowerCase(); if(mime.startsWith('image/')) return '🖼️'; if(mime.startsWith('video/')) return '🎬'; if(mime.startsWith('audio/')) return '🎵'; if(e==='pdf') return '📕'; if(['doc','docx'].includes(e)) return '📘'; if(['xls','xlsx','csv'].includes(e)) return '📗'; if(['ppt','pptx'].includes(e)) return '📙'; if(e==='zip') return '🗜️'; return '📄'; }
 function renderAttach(){ const a=document.getElementById('pattach'); if(!pending){ a.hidden=true; a.innerHTML=''; return; }
   if(pending.voice){ a.hidden=false; a.innerHTML='<span class="big">🎤</span><span class="nm"><b>הודעה קולית</b><audio controls src="'+pending.audioUrl+'"></audio></span><span class="x" onclick="clearAttach()" title="למחוק את ההקלטה">✕</span>'; return; }
-  a.hidden=false; a.innerHTML=(pending.previewUrl?'<img src="'+pending.previewUrl+'">':'<span class="big">'+(pending.loading?'⏳':fileIcon(pending.mimetype,pending.name))+'</span>')+'<span class="nm"><b>'+esc(pending.name)+'</b><span class="muted">'+fmtSize(pending.size)+(pending.loading?' · מכין תצוגה…':'')+'</span></span><span class="x" onclick="clearAttach()" title="להסיר">✕</span>'; }
+  a.hidden=false; a.innerHTML=(pending.previewUrl?'<img src="'+pending.previewUrl+'">':'<span class="big">'+(pending.loading?'⏳':fileIcon(pending.mimetype,pending.name))+'</span>')+'<span class="nm"><b>'+esc(pending.name)+'</b><span class="muted">'+fmtSize(pending.size)+(pending.loading?(pending.loadingText||' · מכין תצוגה…'):'')+'</span></span><span class="x" onclick="clearAttach()" title="להסיר">✕</span>'; }
 function clearAttach(){ pending=null; renderAttach(); }
 document.getElementById('panel').addEventListener('dragover',e=>{ if(!cur) return; e.preventDefault(); document.getElementById('panel').classList.add('drop'); });
 document.getElementById('panel').addEventListener('dragleave',()=>document.getElementById('panel').classList.remove('drop'));
-document.getElementById('panel').addEventListener('drop',e=>{ e.preventDefault(); document.getElementById('panel').classList.remove('drop'); const f=e.dataTransfer&&e.dataTransfer.files[0]; if(f) pickFile(f); });
+document.getElementById('panel').addEventListener('drop',e=>{ e.preventDefault(); document.getElementById('panel').classList.remove('drop'); const dt=e.dataTransfer; const it=dt&&dt.items&&dt.items[0]; const en=it&&it.webkitGetAsEntry&&it.webkitGetAsEntry(); if(en&&en.isDirectory){ dropFolder(en); return; } const f=dt&&dt.files[0]; if(f) pickFile(f); });
 document.getElementById('ptext').addEventListener('paste',e=>{ const it=[...(e.clipboardData&&e.clipboardData.items||[])].find(i=>i.kind==='file'); if(it){ e.preventDefault(); pickFile(it.getAsFile()); } });
 // Voice note recorder: 🎤 starts, 🎤 again (or ■) stops; the recording waits above the box to be heard and sent like an attachment.
 async function toggleRec(){ if(rec){ stopRec(); return; } if(!cur) return;
@@ -927,7 +951,7 @@ async function toggleRec(){ if(rec){ stopRec(); return; } if(!cur) return;
 function stopRec(){ if(rec&&rec.mr.state!=='inactive') rec.mr.stop(); }
 function cancelRec(){ if(!rec) return; rec.cancelled=true; stopRec(); }
 async function sendMsg(){ if(!cur) return; const ta=document.getElementById('ptext'); const text=ta.value.trim();
-  if(rec) return; let rid=replyTo?.id;
+  if(rec) return; if(pending&&!pending.voice&&!pending.data){ alert('רגע, הקובץ עוד בהכנה'); return; } let rid=replyTo?.id;
   if(pending&&pending.voice){ ta.disabled=true; document.getElementById('psent').textContent='שולח הודעה קולית…';
     const r=await fetch('/api/chats/'+encodeURIComponent(cur.chatId)+'/send-voice',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mimetype:pending.mimetype,data:pending.data,replyTo:rid})}); const j=await r.json().catch(()=>({})); ta.disabled=false;
     if(!r.ok){ document.getElementById('psent').textContent=''; alert('השליחה נכשלה: '+(j.error||r.status)); return; }
