@@ -758,7 +758,7 @@ function setView(v){ const prev=view; view=v; localStorage.setItem('view',v); co
 async function loadChats(){ try{ chats=await (await fetch('/api/chats')).json(); }catch{ return; } if(cur&&cur.name===cur.chatId){ const c=chats.find(x=>x.id===cur.chatId); if(c){ cur.name=c.name; document.getElementById('pname-t').textContent=c.name; } } renderChats(); }
 function renderChats(){ const q=(document.getElementById('csearch').value||'').trim().toLowerCase(); const qd=q.replace(/\\D/g,'').replace(/^0/,''); const list=chats.filter(c=>!!c.isGroup===(view==='groups')).filter(c=>!q||(c.name||'').toLowerCase().includes(q)||(c.last_body||'').toLowerCase().includes(q)||(qd.length>=4&&(c.phone||'').replace(/\\D/g,'').includes(qd)));
   const asNum=view!=='groups'&&/^[+\\d][\\d\\s()\\-]{7,}$/.test(q)?'<div class="ci nc" onclick="startChatByNumber(document.getElementById(\\'csearch\\').value)"><b>💬 צ\\'אט חדש עם <bdi>'+esc(q)+'</bdi></b><span class="p">לפתוח שיחה עם המספר הזה, גם אם הוא לא ברשימה</span></div>':'';
-  document.getElementById('clist').innerHTML=asNum+list.map(c=>'<div class="ci '+(cur&&cur.chatId===c.id?'on':'')+'" onclick="openChatById(\\''+esc(c.id)+'\\')"><b>'+esc(c.name||c.id)+'</b><span class="t">'+(c.timestamp?fmtChatTime(c.timestamp):'')+'</span>'+'<span class="p">'+(c.last_from_me?'את: ':'')+esc(c.last_body||'')+'</span>'+(c.unread?'<span class="u">'+c.unread+'</span>':'')+'</div>').join('')||(asNum?'':'<div class="stat" style="padding:14px">'+(view==='groups'?'אין קבוצות להצגה.':'אין צ\\'אטים להצגה.')+'</div>'); }
+  document.getElementById('clist').innerHTML=asNum+list.map(c=>'<div class="ci '+(cur&&cur.chatId===c.id?'on':'')+'" onclick="openChatById(\\''+esc(c.id)+'\\')"><b>'+esc(c.name||c.id)+'</b><span class="t">'+(c.timestamp?fmtChatTime(c.timestamp):'')+'</span>'+'<span class="p">'+(c.last_from_me?'את: ':'')+esc(mlbl(c.last_body||''))+'</span>'+(c.unread?'<span class="u">'+c.unread+'</span>':'')+'</div>').join('')||(asNum?'':'<div class="stat" style="padding:14px">'+(view==='groups'?'אין קבוצות להצגה.':'אין צ\\'אטים להצגה.')+'</div>'); }
 function fmtChatTime(ts){ const d=new Date(ts*1000), now=new Date(); return d.toDateString()===now.toDateString()?d.toLocaleTimeString(L,{hour:'2-digit',minute:'2-digit'}):d.toLocaleDateString(L,{day:'numeric',month:'short'}); }
 function newChatPrompt(){ const v=prompt('לאיזה מספר לשלוח? (למשל 050-1234567 או ‎+1 555 123 4567)'); if(v&&v.trim()) startChatByNumber(v); }
 async function startChatByNumber(num){ let r, j; try{ r=await fetch('/api/chats/by-number',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({number:num})}); j=await r.json().catch(()=>({})); }catch{ alert('אין תשובה מהתוכנה'); return; }
@@ -804,7 +804,9 @@ async function readInfo(m){ if(!m) return; let j; try{ const r=await fetch('/api
   alert(lines.join(String.fromCharCode(10))); loadChat(false); }
 // reply (תגובה): the next message sent quotes this one, as in WhatsApp
 let replyTo=null;
-const msgSnippet=t=>t.length>90?t.slice(0,90)+'…':t;
+// mlbl: the media labels stored in message text ([תמונה] …); the English page swaps in English ones
+const mlbl=t=>t;
+const msgSnippet=t=>{ t=mlbl(t); return t.length>90?t.slice(0,90)+'…':t; };
 function whoSent(m){ return m.from_me?'אני':(m.sender||''); }
 function replyMsg(m){ replyTo=m; renderReply(); document.getElementById('ptext').focus(); }
 function renderReply(){ const a=document.getElementById('preply'); if(!replyTo){ a.hidden=true; a.innerHTML=''; return; }
@@ -870,7 +872,7 @@ function fmtSize(n){ if(!n) return ''; return n>1048576?(n/1048576).toFixed(1)+'
 function contactHtml(m){ if(!(m.body||'').startsWith('[איש קשר]')) return ''; const isTel=p=>p.replace(/[^0-9]/g,'').length>=7; const rows=m.body.slice(9).trim().split(String.fromCharCode(10)).filter(Boolean);
   return rows.map(r=>{ const parts=r.split(' · '); const name=isTel(parts[0])?'':parts[0]; const tel=parts.find(isTel)||'';
     return '<div class="vc"><span class="av" aria-hidden="true">👤</span><span class="nm"><b>'+esc(name||'איש קשר')+'</b>'+parts.slice(name?1:0).map(p=>'<span dir="ltr">'+esc(p)+'</span>').join('')+'</span>'+(tel?'<button type="button" onclick="startChatByNumber(this.dataset.n)" data-n="'+esc(tel)+'">לפתוח צ\\'אט</button>':'')+'</div>'; }).join('')||'<div class="vc"><span class="av">👤</span><span class="nm"><b>איש קשר</b></span></div>'; }
-function bodyText(m){ if(contactHtml(m)) return ''; if(m.media_type&&m.media_type!=='sticker'&&m.body&&m.body.startsWith('[')){ const i=m.body.indexOf(']'); return i>0?m.body.slice(i+1).trim():''; } return m.body||''; }
+function bodyText(m){ if(contactHtml(m)) return ''; if(m.media_type&&m.media_type!=='sticker'&&m.body&&m.body.startsWith('[')){ const i=m.body.indexOf(']'); return i>0?m.body.slice(i+1).trim():''; } return mlbl(m.body||''); }
 function mediaHtml(m){ if(!m.media_type||m.media_type==='sticker') return ''; const url='/api/media/'+encodeURIComponent(m.id); const id=esc(m.id);
   if(m.media_status==='ok'){ const mime=m.media_mime||'';
     if(mime.startsWith('image/')) return '<img class="mimg" alt="לפתוח את התמונה" src="'+url+'" onclick="openMedia(\\''+id+'\\')" title="לפתיחה בגודל מלא">';

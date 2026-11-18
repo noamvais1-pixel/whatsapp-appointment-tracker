@@ -28,5 +28,7 @@ export function englishPage(page) {
   return s
     .replace('<html lang="he" dir="rtl">', '<html lang="en" dir="ltr">')
     .replace("const L='he-IL';", "const L='en-GB';")
-    .replace("el.dir=m&&", "el.dir=!m||"); // an empty text box starts left-to-right
+    .replace("el.dir=m&&", "el.dir=!m||") // an empty text box starts left-to-right
+    // Stored message text keeps the Hebrew media labels (other code matches them); show English ones.
+    .replace("const mlbl=t=>t;", "const mlbl=t=>t===\'הודעה\'?\'Message\':t.replace(/^\\[(תמונה|סרטון|הודעה קולית|קובץ שמע|סטיקר|איש קשר|קובץ:)/,(x,w)=>\'[\'+({\'תמונה\':\'Photo\',\'סרטון\':\'Video\',\'הודעה קולית\':\'Voice note\',\'קובץ שמע\':\'Audio file\',\'סטיקר\':\'Sticker\',\'איש קשר\':\'Contact\',\'קובץ:\':\'File:\'})[w]);");
 }
