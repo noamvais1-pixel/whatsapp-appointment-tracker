@@ -65,6 +65,19 @@ export function startServer(getClient) {
 
   app.use(express.json({ limit: "60mb" })); // attachments arrive base64-encoded in JSON
 
+  // Phone switcher: this copy plus the other copies listed in OTHER_ACCOUNTS (each a separate tracker
+  // with its own data). The others are asked over localhost, which skips their password gate.
+  app.get("/api/whoami", (req, res) => res.json({ me: state.me, status: state.status }));
+  app.get("/api/accounts", async (req, res) => {
+    const others = await Promise.all(config.otherAccounts.map(async (a) => {
+      let info = { me: null, status: "off" };
+      try { const r = await fetch(`http://127.0.0.1:${a.port}/api/whoami`, { signal: AbortSignal.timeout(1500) }); if (r.ok) info = await r.json(); } catch {}
+      return { name: a.name, port: a.port, ...info };
+    }));
+    const all = [{ name: config.accountName, port: config.port, me: state.me, status: state.status, current: true }, ...others];
+    res.json(all.sort((x, y) => x.port - y.port));
+  });
+
   app.get("/api/state", (req, res) => {
     res.json({
       status: state.status, qr: state.qrDataUrl, me: state.me, backfill: state.backfill, lastError: state.lastError, health: state.health, summary: summary(), calendar: calState, startedAt: state.health.startedAt,
@@ -420,6 +433,10 @@ const PAGE = /* html */ `<!doctype html>
   .vrow{display:flex;align-items:center;gap:10px;margin:0 0 14px}
   #tsearch{font:inherit;width:300px;margin-inline-start:auto;padding:9px 14px;border:1px solid var(--line);border-radius:99px;background:var(--glass-strong);color:var(--ink);outline:none;-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
   #tsearch:focus{border-color:rgba(27,122,74,.5);box-shadow:0 0 0 3px rgba(27,122,74,.15)}
+  .accts{display:flex;gap:4px;padding:3px;border-radius:99px;background:var(--glass2);border:1px solid var(--line)}
+  .accts button{border:0;background:transparent;box-shadow:none;padding:5px 13px;font-size:13px;white-space:nowrap}
+  .accts button.on{background:var(--ink);color:#fff}
+  .accts button .muted{font-size:11.5px}
   .views{display:flex;gap:6px;margin:0;padding:4px;border-radius:99px;width:max-content;background:var(--glass2);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);border:1px solid var(--line)}
   .views button{border:0;background:transparent;box-shadow:none;padding:6px 16px}.views button.on{background:var(--ink);color:#fff}
   nav{display:flex;gap:6px;margin:6px 0 16px;flex-wrap:wrap}nav button{padding:6px 12px}nav button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
@@ -525,7 +542,7 @@ const PAGE = /* html */ `<!doctype html>
   @media (prefers-color-scheme: dark){
     :root{--ink:#f1f2f6;--muted:#a7acb8;--line:rgba(255,255,255,.14);--glass:rgba(30,34,44,.55);--glass2:rgba(30,34,44,.4);--glass-strong:rgba(50,55,68,.7);--accent:#3ed48c;--accent2:#1b7a4a;--warn:#ff9a7a;--shadow:0 12px 32px rgba(0,0,0,.35),0 1px 0 rgba(255,255,255,.08) inset}
     body{background:#171a22;background-image:radial-gradient(900px 600px at 85% -10%,rgba(60,120,220,.45),transparent 60%),radial-gradient(700px 500px at -10% 30%,rgba(40,170,130,.35),transparent 60%),radial-gradient(800px 600px at 60% 110%,rgba(140,90,220,.35),transparent 60%)}
-    .pill{background:rgba(62,212,140,.16)}.views button.on,nav button.on{background:#fff;color:#111;border-color:#fff}
+    .pill{background:rgba(62,212,140,.16)}.views button.on,.accts button.on,nav button.on{background:#fff;color:#111;border-color:#fff}
     .b{background:rgba(60,66,80,.8);border-color:rgba(255,255,255,.1)}.b.me{background:rgba(35,110,70,.7)}.b .q,.b .vc,.replybar{background:rgba(255,255,255,.08)}.mmenu,.fwd{background:rgba(40,44,56,.96);border-color:rgba(255,255,255,.12)}.b .mact{background:rgba(40,44,56,.85)}.mph .lbl,.mph .dl{color:#111}
     .strip.ok{background:rgba(40,170,110,.25)}.strip.warn{background:rgba(200,150,30,.25)}.strip.bad{background:rgba(200,80,50,.3)}
     .alert{background:rgba(200,80,50,.3);color:#ffd9cc}.alert.soft{background:rgba(200,150,30,.28);color:#ffe9b0}.qr img{background:#fff}
@@ -621,7 +638,7 @@ const PAGE = /* html */ `<!doctype html>
   @media (forced-colors: active){ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid CanvasText;outline-offset:2px} }
   [role="button"]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 </style></head><body>
-<header><h1>פגישות ומעקבים</h1><span id="status" class="pill">…</span><span id="bf" class="stat"></span><span class="grow"></span>
+<header><h1>פגישות ומעקבים</h1><div id="accts" class="accts" role="group" aria-label="החלפה בין טלפונים" hidden></div><span id="status" class="pill">…</span><span id="bf" class="stat"></span><span class="grow"></span>
 <div id="hdracts"><button id="checkbtn" onclick="checkNow()">לבדוק הודעות חדשות עכשיו</button><button onclick="openDigest()">סדר היום</button><button onclick="checkUpdates()" title="לבדוק אם יש גרסה חדשה ב-GitHub ולהתקין אותה">בדיקת עדכונים</button><button id="switchbtn" onclick="switchPhone()">החלפת טלפון</button><button onclick="quitApp()" title="לעצור את התוכנה">יציאה</button></div></header>
 <div id="strip" class="strip" onclick="this.classList.toggle('open')"><span class="dot"></span><b id="stext">בודק…</b><span class="d" id="sdetails"></span><span class="grow"></span><span class="stat">לחיצה לפרטים</span></div>
 <main id="main">
@@ -1008,5 +1025,11 @@ async function copyRef(btn,enc){ const t=decodeURIComponent(enc); try{ await nav
 async function copyAllRefs(){ try{ const t=await (await fetch('/api/refs/export')).text(); await navigator.clipboard.writeText(t); alert('הרשימה הועתקה.'); }catch{ alert('ההעתקה לא עבדה.'); } }
 async function openRefChat(chatId,msgId,encName){ setView(chatId.endsWith('@g.us')?'groups':'chats'); await showChat({chatId,name:decodeURIComponent(encName),msgId}); }
 
-load(); setInterval(load,10000);
+// Phone switcher in the header: each phone is a separate tracker on its own port, so switching opens that one.
+async function loadAccounts(){ let a; try{ a=await (await fetch('/api/accounts')).json(); }catch{ return; }
+  const box=document.getElementById('accts'); if(!Array.isArray(a)||a.length<2){ box.hidden=true; return; }
+  box.hidden=false;
+  box.innerHTML=a.map(x=>'<button class="'+(x.current?'on':'')+'" '+(x.current?'aria-current="true"':'onclick="goAcct('+x.port+')"')+' title="'+esc(x.status==='ready'?(x.me||''):x.status==='off'?'לא פועל כרגע':'לא מחובר עדיין')+'">📱 '+esc(x.name)+(x.status==='ready'?'':' <span class="muted">'+(x.status==='off'?'(כבוי)':'(לא מחובר)')+'</span>')+'</button>').join(''); }
+function goAcct(port){ location.href=location.protocol+'//'+location.hostname+':'+port+'/'; }
+load(); setInterval(load,10000); loadAccounts(); setInterval(loadAccounts,30000);
 </script></body></html>`;

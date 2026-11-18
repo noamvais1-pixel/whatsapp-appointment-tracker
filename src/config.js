@@ -26,6 +26,13 @@ export const config = {
   onlyChats: list(process.env.ONLY_CHATS),
   skipChats: list(process.env.SKIP_CHATS),
   port: Number(process.env.PORT || 3123),
+  // Several phones: each one is its own copy of the project folder with its own data. The header shows
+  // a switcher between them. ACCOUNT_NAME names this one; OTHER_ACCOUNTS lists the others as
+  // name|port|folder, comma-separated. launch.sh starts the other folders too.
+  accountName: process.env.ACCOUNT_NAME || "טלפון 1",
+  otherAccounts: list(process.env.OTHER_ACCOUNTS)
+    .map((s) => { const [name, port] = s.split("|").map((x) => x.trim()); return { name, port: Number(port) }; })
+    .filter((a) => a.name && a.port),
   // Blank = no password, dashboard open to the whole Wi-Fi network. See src/auth.js.
   dashboardPassword: process.env.DASHBOARD_PASSWORD || "",
   // Requests from this Mac itself skip the password, so the desktop app keeps working.

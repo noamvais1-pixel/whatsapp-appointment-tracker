@@ -172,8 +172,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
         editItem.submenu = edit
         NSApp.mainMenu = main
     }
-    @objc func reload() { load() }
-    @objc func openInBrowser() { NSWorkspace.shared.open(dashboardURL) }
+    // reload whichever phone is showing (the header switcher may have moved to another port)
+    @objc func reload() { if web.url?.host == "localhost" { web.reload() } else { load() } }
+    @objc func openInBrowser() { NSWorkspace.shared.open(web.url?.host == "localhost" ? web.url! : dashboardURL) }
 }
 
 let app = NSApplication.shared

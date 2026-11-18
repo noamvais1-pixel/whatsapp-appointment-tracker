@@ -30,4 +30,18 @@ if ! alive; then
     exit 1
   fi
 fi
+
+# Other phones (OTHER_ACCOUNTS=name|port|folder,... in .env) are separate copies of the project:
+# start any that are not running, so the phone switcher in the header can reach them.
+if [ -z "$TRACKER_SIBLING" ]; then
+  OTHERS="$(grep -E '^OTHER_ACCOUNTS=' "$DIR/.env" 2>/dev/null | cut -d= -f2-)"
+  IFS=',' read -ra ACCTS <<< "$OTHERS"
+  for a in "${ACCTS[@]}"; do
+    IFS='|' read -r _ oport odir <<< "$a"
+    odir="$(echo "$odir" | sed 's/^ *//;s/ *$//')"; oport="$(echo "$oport" | tr -d ' ')"
+    [ -n "$odir" ] && [ -f "$odir/launch.sh" ] || continue
+    curl -s --max-time 2 "http://localhost:$oport/api/state" >/dev/null 2>&1 && continue
+    TRACKER_SIBLING=1 nohup /bin/bash "$odir/launch.sh" --no-open >/dev/null 2>&1 &
+  done
+fi
 [ "$1" = "--no-open" ] || open "$URL"
