@@ -802,7 +802,7 @@ function msgMenu(e){ e.stopPropagation(); const id=e.target.closest('.b').datase
   if(m.from_me&&!m.deleted_at) opts.push(['👁 מי קרא',()=>readInfo(m)]);
   if(m.from_me&&!m.deleted_at&&!m.media_type&&age<15*60) opts.push(['✏️ עריכה',()=>editMsg(m)]);
   if(m.from_me&&!m.deleted_at&&age<60*3600) opts.push(['🗑 מחיקה אצל כולם',()=>delMsg(m,true)]);
-  opts.push(['מחיקה רק אצלי',()=>delMsg(m,false)]);
+  opts.push([m.deleted_at?'🗑 להסיר מכאן':'מחיקה רק אצלי',()=>delMsg(m,false)]);
   const menu=document.createElement('div'); menu.id='mmenu'; menu.className='mmenu';
   for(const [label,fn] of opts){ const b=document.createElement('button'); b.textContent=label; b.onclick=()=>{ closeMsgMenu(); fn(); }; menu.appendChild(b); }
   document.body.appendChild(menu); const r=e.type==='contextmenu'?{bottom:e.clientY,left:e.clientX}:e.target.getBoundingClientRect();
@@ -885,7 +885,7 @@ async function msgAction(m,what,body,failMsg){ let r,j; try{ r=await fetch('/api
   if(!r.ok) alert(r.status===409&&/too late/.test(j.error||'')?failMsg:r.status===409?'WhatsApp לא מחובר כרגע':'זה לא הצליח: '+(j.error||r.status)); loadChat(false); }
 function editMsg(m){ const v=prompt('עריכת ההודעה (תשתנה גם בטלפון של מי שקיבל אותה):',m.body); if(v==null||!v.trim()||v.trim()===m.body) return;
   msgAction(m,'edit',{text:v.trim()},'WhatsApp מאפשר לערוך הודעה רק ב-15 הדקות הראשונות אחרי השליחה.'); }
-function delMsg(m,everyone){ if(!confirm(everyone?'למחוק את ההודעה אצל כולם? היא תימחק גם מהטלפון של מי שקיבל אותה. (כאן היא תישאר מסומנת כמחוקה)':'למחוק את ההודעה רק אצלך? אצל הצד השני היא תישאר.')) return;
+function delMsg(m,everyone){ if(!confirm(m.deleted_at&&!everyone?'להסיר את ההודעה מכאן? היא כבר נמחקה ב-WhatsApp, וההעתק ששמרנו כאן יימחק.':everyone?'למחוק את ההודעה אצל כולם? היא תימחק גם מהטלפון של מי שקיבל אותה. (כאן היא תישאר מסומנת כמחוקה)':'למחוק את ההודעה רק אצלך? אצל הצד השני היא תישאר.')) return;
   msgAction(m,'delete',{everyone},'WhatsApp מאפשר למחוק אצל כולם רק בערך יומיים אחרי השליחה. אפשר עדיין למחוק רק אצלך.'); }
 function closeChat(){ cancelRec(); clearReply(); document.getElementById('panel').classList.remove('open'); clearInterval(ptimer); cur=null; }
 setView(view);

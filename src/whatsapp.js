@@ -665,7 +665,12 @@ export async function forwardMessages(ids, chatIds, progress = {}) {
   for (const chatId of chatIds) for (const msg of msgs) { await msg.forward(chatId); progress.done++; }
 }
 export async function deleteMessage(id, everyone) {
-  const msg = await ownMessage(id);
+  // A message already deleted for everyone may be gone from WhatsApp; "delete for me" then only removes the copy kept here.
+  const msg = await ownMessage(id).catch((e) => {
+    if (!everyone && e.code === 404 && store.getMessage(id)?.deleted_at) return null;
+    throw e;
+  });
+  if (!msg) return forgetHere(id);
   if (everyone) {
     const can = await current.pupPage.evaluate(async (id) => {
       const C = window.require("WAWebCollections");
@@ -677,9 +682,12 @@ export async function deleteMessage(id, everyone) {
     store.markDeleted(id); // the original text stays visible here, as for messages others delete
   } else {
     await msg.delete(false);
-    const media = store.getMedia(id);
-    if (media?.path) fs.rmSync(media.path, { force: true });
-    if (media?.thumb) fs.rmSync(media.thumb, { force: true });
-    store.forgetMessage(id);
+    forgetHere(id);
   }
+}
+function forgetHere(id) {
+  const media = store.getMedia(id);
+  if (media?.path) fs.rmSync(media.path, { force: true });
+  if (media?.thumb) fs.rmSync(media.thumb, { force: true });
+  store.forgetMessage(id);
 }

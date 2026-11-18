@@ -245,5 +245,7 @@
   ["אפשר לבחור עד 30 הודעות בבת אחת", "You can select up to 30 messages at a time"],
   ["אחת ההודעות כבר לא נמצאת ב-WhatsApp, אי אפשר להעביר אותה.", "One of the messages is no longer in WhatsApp, so it can’t be forwarded."],
   [" (הספקתי להעביר ", " (forwarded "],
-  [" מתוך ", " of "]
+  [" מתוך ", " of "],
+  ["🗑 להסיר מכאן", "🗑 Remove from here"],
+  ["להסיר את ההודעה מכאן? היא כבר נמחקה ב-WhatsApp, וההעתק ששמרנו כאן יימחק.", "Remove this message from here? It’s already deleted in WhatsApp, and the copy kept here will be removed."]
 ]
