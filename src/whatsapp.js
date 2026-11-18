@@ -355,7 +355,12 @@ function createClient({ onReady } = {}) {
   client.on("message_edit", (msg, newBody, prevBody) => {
     try {
       const id = msg.id?._serialized;
-      if (id && typeof newBody === "string") store.markEdited(id, newBody, prevBody ?? null);
+      if (!id || typeof newBody !== "string") return;
+      // After a picture or video is sent, WhatsApp fills its body with the hidden preview (a long base64 string)
+      // and the library reports that as an edit. Not a real edit: keep the stored "[תמונה]" label.
+      if (msg.type !== "chat" && /^[A-Za-z0-9+/=]{100,}$/.test(newBody)) return;
+      // a real caption edit keeps the media label in front, like a newly stored picture
+      store.markEdited(id, msg.type === "chat" ? newBody : (messageText({ type: msg.type, body: newBody, _data: msg._data }) || newBody), prevBody ?? null);
     } catch {}
   });
 
