@@ -16,6 +16,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { processPending } from "./processor.js";
 import { checkSpelling, learnWord, warmUpSpelling } from "./spell.js";
+import { EN, tr, englishPage } from "./i18n.js";
 
 // Group messages often carry only the sender's WhatsApp id (…@lid); show the contact's name or number instead.
 const senderNames = new Map();
@@ -141,7 +142,7 @@ export function startServer(getClient) {
   app.post("/api/chats/:chatId/send-file", async (req, res) => {
     const { name, mimetype, data, caption = "", asDocument = false, replyTo } = req.body || {};
     if (!data || !mimetype) return res.status(400).json({ error: "missing file" });
-    if (Buffer.byteLength(data, "base64") > 45 * 1024 * 1024) return res.status(413).json({ error: "הקובץ גדול מ-45MB" });
+    if (Buffer.byteLength(data, "base64") > 45 * 1024 * 1024) return res.status(413).json({ error: tr("הקובץ גדול מ-45MB", "The file is larger than 45MB") });
     const client = getClient?.();
     if (!client || state.status !== "ready") return res.status(409).json({ error: "WhatsApp not linked" });
     try {
@@ -164,7 +165,7 @@ export function startServer(getClient) {
     const client = getClient?.();
     if (!client || state.status !== "ready") return res.status(409).json({ error: "WhatsApp not linked" });
     const ff = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"].find((p) => fs.existsSync(p));
-    if (!ff) return res.status(500).json({ error: "חסר ffmpeg במחשב (brew install ffmpeg)" });
+    if (!ff) return res.status(500).json({ error: tr("חסר ffmpeg במחשב (brew install ffmpeg)", "ffmpeg is missing on this Mac (brew install ffmpeg)") });
     const tmp = path.join(os.tmpdir(), `voice-${Date.now()}`);
     const ext = mimetype.includes("webm") ? "webm" : mimetype.includes("ogg") ? "ogg" : "m4a";
     try {
@@ -341,7 +342,7 @@ export function startServer(getClient) {
     setTimeout(async () => { try { (await import("./index.js")).shutdown(); } catch { process.exit(0); } }, 300);
   });
 
-  app.get("/", (req, res) => res.type("html").send(PAGE));
+  app.get("/", (req, res) => res.type("html").send(EN ? (PAGE_EN ??= englishPage(PAGE)) : PAGE));
 
   app.listen(config.port, config.bindHost, () => {
     console.log(`[dashboard] on this Mac:  http://localhost:${config.port}`);
@@ -364,10 +365,10 @@ export function startServer(getClient) {
 }
 
 const MANIFEST = JSON.stringify({
-  name: "פגישות ומעקבים",
-  short_name: "פגישות",
-  lang: "he",
-  dir: "rtl",
+  name: tr("פגישות ומעקבים", "Meetings & follow-ups"),
+  short_name: tr("פגישות", "Meetings"),
+  lang: tr("he", "en"),
+  dir: tr("rtl", "ltr"),
   start_url: "/",
   scope: "/",
   display: "standalone",
@@ -381,6 +382,7 @@ const MANIFEST = JSON.stringify({
   ],
 });
 
+let PAGE_EN = null;
 const PAGE = /* html */ `<!doctype html>
 <html lang="he" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">

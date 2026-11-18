@@ -8,6 +8,7 @@
  */
 import { db, getMeta } from "./db.js";
 import { config } from "./config.js";
+import { tr } from "./i18n.js";
 
 /* ---------------------------------------------------------------- helpers */
 
@@ -21,15 +22,15 @@ const clean = (s) => s.replace(/[‎‏⁦-⁩‪-‮]/g, "");
 // Order matters: the first matcher to claim a stretch of text wins.
 
 const TYPES = {
-  link: { he: "קישור", icon: "🔗" },
-  email: { he: "אימייל", icon: "✉️" },
-  phone: { he: "טלפון", icon: "📞" },
-  bank: { he: "פרטי בנק", icon: "🏦" },
-  id: { he: "תעודת זהות", icon: "🪪" },
-  ref: { he: "אסמכתא / הזמנה", icon: "🧾" },
-  code: { he: "קוד", icon: "🔑" },
-  address: { he: "כתובת", icon: "📍" },
-  number: { he: "מספר", icon: "#️⃣" },
+  link: { he: tr("קישור", "Link"), icon: "🔗" },
+  email: { he: tr("אימייל", "Email"), icon: "✉️" },
+  phone: { he: tr("טלפון", "Phone"), icon: "📞" },
+  bank: { he: tr("פרטי בנק", "Bank details"), icon: "🏦" },
+  id: { he: tr("תעודת זהות", "ID number"), icon: "🪪" },
+  ref: { he: tr("אסמכתא / הזמנה", "Reference / order"), icon: "🧾" },
+  code: { he: tr("קוד", "Code"), icon: "🔑" },
+  address: { he: tr("כתובת", "Address"), icon: "📍" },
+  number: { he: tr("מספר", "Number"), icon: "#️⃣" },
 };
 
 // Keywords that tell us what a number actually is.
@@ -122,7 +123,7 @@ export function extractFromText(text) {
     out.push({
       type: "bank",
       value: `סניף ${branch} · חשבון ${account}`,
-      display: `סניף ${branch} · חשבון ${account}`,
+      display: tr(`סניף ${branch} · חשבון ${account}`, `Branch ${branch} · Account ${account}`),
       label: m[0].trim(),
       start: m.index,
       end: m.index + m[0].length,
@@ -249,7 +250,7 @@ export function allRefs() {
           chat_name: m.chat_name,
           from_me: !!m.from_me,
           self_chat: isSelfChat,
-          sender: m.from_me ? "את" : m.sender,
+          sender: m.from_me ? tr("את", "You") : m.sender,
           ts: m.ts,
           context: snippet(body, hit.start, hit.end),
         });
@@ -287,11 +288,11 @@ export { TYPES as REF_TYPES };
 /** Plain-text export, for pasting into a note or sending to yourself. */
 export function refsText(list = allRefs()) {
   const fmtDate = (ts) =>
-    new Date(ts * 1000).toLocaleDateString("he-IL", { day: "numeric", month: "short", year: "numeric", timeZone: config.timezone });
+    new Date(ts * 1000).toLocaleDateString(tr("he-IL", "en-GB"), { day: "numeric", month: "short", year: "numeric", timeZone: config.timezone });
   return list
     .map((e) => {
       const o = e.occurrences[0];
-      return `${e.icon} ${e.display}\n   ${e.type_he}${e.self_note ? " · פתק לעצמי" : ""} · ${o.chat_name || ""} · ${fmtDate(e.last_ts)}\n   ${o.context}`;
+      return `${e.icon} ${e.display}\n   ${e.type_he}${e.self_note ? tr(" · פתק לעצמי", " · note to self") : ""} · ${o.chat_name || ""} · ${fmtDate(e.last_ts)}\n   ${o.context}`;
     })
     .join("\n\n");
 }

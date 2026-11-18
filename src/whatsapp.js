@@ -8,6 +8,7 @@ import { config, chatAllowed } from "./config.js";
 import * as store from "./db.js";
 import { processPending } from "./processor.js";
 import { notify } from "./notify.js";
+import { tr } from "./i18n.js";
 
 const { Client, LocalAuth } = pkg;
 
@@ -44,14 +45,14 @@ export function reportRead(ok, err) {
   // every read now fails with "detached Frame". Treat it as a dropped link so the watchdog reconnects.
   if (h.readErrors >= 4 && transientPage(msg) && state.status === "ready") {
     state.status = "disconnected";
-    state.lastError = "החיבור לוואטסאפ התנתק מאחורי הקלעים";
+    state.lastError = tr("החיבור לוואטסאפ התנתק מאחורי הקלעים", "the WhatsApp connection dropped in the background");
     console.warn("[health] page handle is stale (detached frame) - marking link as dropped so it reconnects");
     return;
   }
   if (h.readErrors >= 2 && looksLikeBreakage(msg) && !h.whatsapp) {
-    h.whatsapp = "התוכנה מחוברת אבל לא מצליחה לקרוא הודעות. כנראה וואטסאפ שינה משהו וצריך עדכון של התוכנה.";
+    h.whatsapp = tr("התוכנה מחוברת אבל לא מצליחה לקרוא הודעות. כנראה וואטסאפ שינה משהו וצריך עדכון של התוכנה.", "The tracker is connected but can't read messages. WhatsApp probably changed something and the tracker needs an update.");
     console.error(`[health] WhatsApp reading is broken (error "${msg.slice(0, 60)}")`);
-    notify("מעקב פגישות - בעיה", "וואטסאפ שינה משהו; התוכנה לא מצליחה לקרוא הודעות. צריך עדכון.");
+    notify(tr("מעקב פגישות - בעיה", "Tracker - problem"), tr("וואטסאפ שינה משהו; התוכנה לא מצליחה לקרוא הודעות. צריך עדכון.", "WhatsApp changed something; the tracker can't read messages. It needs an update."));
   }
 }
 export function reportGemini(ok, err) {
@@ -60,13 +61,13 @@ export function reportGemini(ok, err) {
   const msg = String(err?.message || err);
   const quota = /RESOURCE_EXHAUSTED|quota/i.test(msg);
   const text = /API key not valid|API_KEY_INVALID|PERMISSION_DENIED/i.test(msg)
-    ? "מפתח ה-Gemini לא תקין. יש לבדוק את GEMINI_API_KEY בקובץ .env."
-    : quota ? "מכסת Gemini החינמית נגמרה להיום; הקריאה תמשיך כשהמכסה תתחדש (או להפעיל חיוב על המפתח)."
-    : `Gemini לא זמין כרגע: ${msg.slice(0, 80)}`;
+    ? tr("מפתח ה-Gemini לא תקין. יש לבדוק את GEMINI_API_KEY בקובץ .env.", "The Gemini key isn't valid. Check GEMINI_API_KEY in the .env file.")
+    : quota ? tr("מכסת Gemini החינמית נגמרה להיום; הקריאה תמשיך כשהמכסה תתחדש (או להפעיל חיוב על המפתח).", "The free Gemini quota is used up for today; reading continues when it renews (or turn on billing for the key).")
+    : tr("Gemini לא זמין כרגע: ", "Gemini isn't available right now: ") + msg.slice(0, 80);
   if (h.gemini !== text) {
     h.gemini = text;
     console.error(`[health] Gemini problem: ${text}`);
-    if (!quota) notify("מעקב פגישות - בעיה", text);
+    if (!quota) notify(tr("מעקב פגישות - בעיה", "Tracker - problem"), text);
   }
 }
 
@@ -400,7 +401,7 @@ export async function runBackfill() {
           // the page reloaded under us; retrying on the stale handle never works - reconnect and resume on "ready"
           if (attempt >= 2 && state.status === "ready") {
             state.status = "disconnected";
-            state.lastError = "וואטסאפ ווב נטען מחדש באמצע הקריאה; מתחבר מחדש וממשיך";
+            state.lastError = tr("וואטסאפ ווב נטען מחדש באמצע הקריאה; מתחבר מחדש וממשיך", "WhatsApp Web reloaded during the read; reconnecting and continuing");
             console.warn("[whatsapp] page reloaded during backfill - reconnecting, the read will resume");
             return false;
           }

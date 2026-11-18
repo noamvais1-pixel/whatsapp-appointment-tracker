@@ -1,6 +1,7 @@
 import { config } from "./config.js";
 import * as store from "./db.js";
 import { notify } from "./notify.js";
+import { tr } from "./i18n.js";
 
 /**
  * Meetings and calls whose time passed more than AUTO_CLOSE_PAST_HOURS ago:
@@ -18,16 +19,16 @@ export function closePastAppointments(now = Date.now()) {
     if (!it.when_iso || it.type === "follow_up") continue;
     const when = it.when_iso.length === 10 ? new Date(it.when_iso + "T23:59:00") : new Date(it.when_iso);
     if (Number.isNaN(when.getTime()) || when > limit) continue;
-    const tentative = it.confidence === "low" || /מוצע, לא אושר/.test(it.notes || "");
+    const tentative = it.confidence === "low" || /מוצע, לא אושר|Proposed, not confirmed/i.test(it.notes || "");
     if (tentative) {
       const who = it.who || it.chat_name || "";
-      const title = `לקבל תשובה${who ? ` מ${who}` : ""} על ${it.title}`;
-      store.editItem(it.id, { type: "follow_up", title, when_iso: today, notes: `${it.notes || ""}\nהמועד המוצע (${it.when_text || it.when_iso}) עבר בלי תשובה - צריך לתאם מחדש.`.trim() });
-      store.db.prepare("UPDATE items SET all_day = 1, when_text = ? WHERE id = ?").run("המועד המוצע עבר בלי תשובה", it.id);
+      const title = tr(`לקבל תשובה${who ? ` מ${who}` : ""} על ${it.title}`, `Get an answer${who ? ` from ${who}` : ""} about ${it.title}`);
+      store.editItem(it.id, { type: "follow_up", title, when_iso: today, notes: `${it.notes || ""}\n${tr(`המועד המוצע (${it.when_text || it.when_iso}) עבר בלי תשובה - צריך לתאם מחדש.`, `The proposed time (${it.when_text || it.when_iso}) passed with no answer - needs rescheduling.`)}`.trim() });
+      store.db.prepare("UPDATE items SET all_day = 1, when_text = ? WHERE id = ?").run(tr("המועד המוצע עבר בלי תשובה", "The proposed time passed with no answer"), it.id);
       console.log(`  ~ [follow_up] ${title}`);
-      notify("מעקב פגישות", title);
+      notify(tr("מעקב פגישות", "Tracker"), title);
     } else {
-      store.setStatus(it.id, "done", "המועד עבר (נסגר אוטומטית)");
+      store.setStatus(it.id, "done", tr("המועד עבר (נסגר אוטומטית)", "The time passed (closed automatically)"));
       console.log(`  x [done] ${it.title} - המועד עבר`);
     }
     n++;

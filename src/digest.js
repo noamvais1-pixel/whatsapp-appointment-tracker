@@ -1,5 +1,6 @@
 import { config } from "./config.js";
 import * as store from "./db.js";
+import { tr } from "./i18n.js";
 
 const DAY = 86400000;
 
@@ -8,10 +9,10 @@ export function localDateKey(d = new Date()) {
 }
 
 export function fmtWhen(it) {
-  if (!it.when_iso) return it.when_text || "בלי תאריך";
+  if (!it.when_iso) return it.when_text || tr("בלי תאריך", "No date");
   const [date, time] = it.when_iso.split("T");
   const d = new Date(date + "T12:00:00");
-  const day = d.toLocaleDateString("he-IL", { weekday: "short", day: "numeric", month: "short" });
+  const day = d.toLocaleDateString(tr("he-IL", "en-GB"), { weekday: "short", day: "numeric", month: "short" });
   return time && !it.all_day ? `${day} ${time}` : day;
 }
 
@@ -28,11 +29,12 @@ export function buildDigest(now = new Date()) {
   const week = items.filter((it) => key(it) > today && key(it) <= weekEnd);
   const undated = items.filter((it) => !key(it) && it.type === "follow_up");
 
-  const parts = [`*סדר היום ל${now.toLocaleDateString("he-IL", { weekday: "long", day: "numeric", month: "long", timeZone: config.timezone })}*`];
-  parts.push(todays.length ? `\n*היום*\n${todays.map(line).join("\n")}` : "\n*היום*\nאין כלום מתוכנן.");
-  if (overdue.length) parts.push(`\n*באיחור / לא סומן כבוצע*\n${overdue.map(line).join("\n")}`);
-  if (week.length) parts.push(`\n*7 הימים הקרובים*\n${week.map(line).join("\n")}`);
-  if (undated.length) parts.push(`\n*מעקבים בלי תאריך*\n${undated.map(line).join("\n")}`);
+  const dateText = now.toLocaleDateString(tr("he-IL", "en-GB"), { weekday: "long", day: "numeric", month: "long", timeZone: config.timezone });
+  const parts = [tr(`*סדר היום ל${dateText}*`, `*Agenda for ${dateText}*`)];
+  parts.push(todays.length ? `\n*${tr("היום", "Today")}*\n${todays.map(line).join("\n")}` : tr("\n*היום*\nאין כלום מתוכנן.", "\n*Today*\nNothing planned."));
+  if (overdue.length) parts.push(`\n*${tr("באיחור / לא סומן כבוצע", "Overdue / not marked done")}*\n${overdue.map(line).join("\n")}`);
+  if (week.length) parts.push(`\n*${tr("7 הימים הקרובים", "Next 7 days")}*\n${week.map(line).join("\n")}`);
+  if (undated.length) parts.push(`\n*${tr("מעקבים בלי תאריך", "Follow-ups with no date")}*\n${undated.map(line).join("\n")}`);
   return parts.join("\n");
 }
 

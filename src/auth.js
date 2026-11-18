@@ -15,6 +15,7 @@
 // stranger on cafe Wi-Fi from browsing the data; it does not stop someone capturing traffic.
 
 import crypto from "node:crypto";
+import { tr } from "./i18n.js";
 import fs from "node:fs";
 import path from "node:path";
 import { config, DATA_DIR } from "./config.js";
@@ -79,9 +80,9 @@ const OPEN_PATHS = new Set([
 export const authEnabled = () => Boolean(config.dashboardPassword);
 
 const LOGIN_PAGE = (error) => /* html */ `<!doctype html>
-<html lang="he" dir="rtl"><head><meta charset="utf-8">
+<html lang="${tr("he", "en")}" dir="${tr("rtl", "ltr")}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>פגישות ומעקבים</title>
+<title>${tr("פגישות ומעקבים", "Meetings & follow-ups")}</title>
 <style>
   *{box-sizing:border-box}
   body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
@@ -113,12 +114,12 @@ const LOGIN_PAGE = (error) => /* html */ `<!doctype html>
   }
 </style></head><body>
 <form method="post" action="/login">
-  <h1>פגישות ומעקבים</h1>
-  <p>הדף הזה מציג הודעות ופרטים אישיים. צריך סיסמה כדי להיכנס מהרשת.</p>
-  ${error ? `<div class="err">סיסמה שגויה. אפשר לנסות שוב.</div>` : ""}
+  <h1>${tr("פגישות ומעקבים", "Meetings & follow-ups")}</h1>
+  <p>${tr("הדף הזה מציג הודעות ופרטים אישיים. צריך סיסמה כדי להיכנס מהרשת.", "This page shows messages and personal details. A password is needed to open it from the network.")}</p>
+  ${error ? `<div class="err">${tr("סיסמה שגויה. אפשר לנסות שוב.", "Wrong password. Try again.")}</div>` : ""}
   <input type="password" name="password" autocomplete="current-password" autofocus
-         placeholder="סיסמה" aria-label="סיסמה">
-  <button type="submit">כניסה</button>
+         placeholder="${tr("סיסמה", "Password")}" aria-label="${tr("סיסמה", "Password")}">
+  <button type="submit">${tr("כניסה", "Sign in")}</button>
 </form>
 </body></html>`;
 

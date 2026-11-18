@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { z } from "zod";
 import { config } from "./config.js";
 import * as store from "./db.js";
+import { tr } from "./i18n.js";
 
 let ai = null;
 const client = () => (ai ??= new GoogleGenAI({ apiKey: config.geminiKey }));
@@ -70,10 +71,10 @@ Rules:
 - A single message can produce several items. Both sides' messages count: something the other person will do for Me is a follow_up to check on.
 - Attachments: some messages are images or files. Small previews of images are attached to this request, labelled IMG1, IMG2... matching the [IMG1] tags in the message list. Look at them: a screenshot of a bank transfer / payment confirmation, a signed form, a receipt, or the document someone asked for usually means the related follow-up is DONE (Me sent the proof, or they sent what Me was waiting for). Use action "done" with the existing_id in that case. A photo unrelated to any open item is just ignored.
 - A file (PDF etc.) or image from Me sent shortly after someone gave bank details or asked Me to send something is very likely the thing they asked for - treat the follow-up as done unless the text says otherwise.
-- A time that one side only PROPOSED ("are you free today at 13:00?", "let's talk this evening") and the other side never confirmed is tentative: set confidence to "low" and start the notes with "מוצע, לא אושר". If the proposal was answered with a different time, use the agreed time.
+- A time that one side only PROPOSED ("are you free today at 13:00?", "let's talk this evening") and the other side never confirmed is tentative: set confidence to "low" and start the notes with "${tr("מוצע, לא אושר", "Proposed, not confirmed")}". If the proposal was answered with a different time, use the agreed time.
 - Titles are short and specific. Notes hold the detail. Do not invent details not in the messages.
 - Return an empty items list when there is nothing actionable.
-- Write title, notes, when_text and location in Hebrew (keep people's and business names as they appear in the chat).
+- Write title, notes, when_text and location in ${tr("Hebrew", "English")} (keep people's and business names as they appear in the chat).
 - Respond with JSON only, matching the provided schema.`;
 
 function fmtTs(ts, tz) {
@@ -188,7 +189,7 @@ Say needs_follow_up = false when:
 - the chat is with an automated bot/system, a delivery notice, or a one-way notification number
 
 Be practical: reminders that are not really needed are annoying. When unsure, lean towards false unless money, an appointment, or a customer decision is at stake.
-title: a short reminder Me can act on, in Hebrew, e.g. "לחזור לדנה בקשר להצעת המחיר" or "לבדוק עם דנה לגבי השכרת הכיתה". reason: one sentence in Hebrew. Respond with JSON only.`;
+title: a short reminder Me can act on, in ${tr("Hebrew", "English")}, e.g. ${tr(`"לחזור לדנה בקשר להצעת המחיר" or "לבדוק עם דנה לגבי השכרת הכיתה"`, `"Get back to Dana about the price quote" or "Check with Dana about renting the classroom"`)}. reason: one sentence in ${tr("Hebrew", "English")}. Respond with JSON only.`;
 
 const JUDGE_SCHEMA = {
   type: "object",

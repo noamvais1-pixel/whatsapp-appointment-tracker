@@ -12,6 +12,7 @@ import { syncCalendar } from "./calendar.js";
 import { startUpdater } from "./updater.js";
 import { notify } from "./notify.js";
 import { maintainAutoMedia } from "./media.js";
+import { tr } from "./i18n.js";
 
 if (!config.geminiKey) {
   console.error("\nGEMINI_API_KEY is not set. Open the .env file, paste your Gemini API key after GEMINI_API_KEY=, then run again.\n");
@@ -103,8 +104,8 @@ setInterval(() => {
   try {
     const s = summary();
     if (lastLevel && s.level !== lastLevel) {
-      if (s.level === "bad") notify("מעקב פגישות - לא עובד", s.text);
-      else if (lastLevel === "bad" && s.level === "ok") notify("מעקב פגישות", "חזר לעבוד: " + s.text);
+      if (s.level === "bad") notify(tr("מעקב פגישות - לא עובד", "Tracker - not working"), s.text);
+      else if (lastLevel === "bad" && s.level === "ok") notify(tr("מעקב פגישות", "Tracker"), tr("חזר לעבוד: ", "Working again: ") + s.text);
     }
     lastLevel = s.level;
   } catch {}

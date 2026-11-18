@@ -4,6 +4,7 @@ import { notify } from "./notify.js";
 import { localDateKey } from "./digest.js";
 import { judgeFollowUp } from "./extract.js";
 import { state } from "./whatsapp.js";
+import { tr } from "./i18n.js";
 
 // Obvious non-questions we never bother Gemini with ("thanks", "ok", an emoji...).
 const CLOSERS = new Set([
@@ -52,17 +53,17 @@ export async function checkNoReplies(now = Date.now()) {
         console.log(`  · no follow-up needed: ${m.chat_name} (${verdict.reason})`);
         continue;
       }
-      const sent = new Date(m.ts * 1000).toLocaleString("he-IL", { timeZone: config.timezone, day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+      const sent = new Date(m.ts * 1000).toLocaleString(tr("he-IL", "en-GB"), { timeZone: config.timezone, day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
       store.insertItem({
         type: "follow_up",
         kind: "noreply",
-        title: verdict.title || `${m.chat_name} לא ענה/תה - לעשות מעקב`,
+        title: verdict.title || tr(`${m.chat_name} לא ענה/תה - לעשות מעקב`, `${m.chat_name} didn't answer - follow up`),
         who: m.chat_name,
         chat_id: m.chat_id,
         chat_name: m.chat_name,
         when_iso: localDateKey(new Date(now)),
         all_day: true,
-        when_text: `בלי תשובה מאז ${sent}`,
+        when_text: tr(`בלי תשובה מאז ${sent}`, `No answer since ${sent}`),
         notes: verdict.reason,
         confidence: verdict.urgency === "low" ? "medium" : "high",
         source_msg_id: m.id,
@@ -70,7 +71,7 @@ export async function checkNoReplies(now = Date.now()) {
       });
       store.setMeta(`noreply:${m.id}`, "yes");
       console.log(`  + [follow_up] ${verdict.title}  (${m.chat_name}, unanswered since ${sent})`);
-      notify(`אין תשובה מ-${m.chat_name}`, verdict.title);
+      notify(tr(`אין תשובה מ-${m.chat_name}`, `No answer from ${m.chat_name}`), verdict.title);
       created++;
     }
   } finally {

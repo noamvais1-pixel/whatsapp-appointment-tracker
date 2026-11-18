@@ -2,9 +2,10 @@ import { extractItems } from "./extract.js";
 import * as store from "./db.js";
 import { notify } from "./notify.js";
 import { reportGemini } from "./whatsapp.js";
+import { tr } from "./i18n.js";
 
 const BATCH = 80;
-const TYPE_HE = { meeting: "פגישה", call: "שיחה", follow_up: "מעקב" };
+const TYPE_HE = { meeting: tr("פגישה", "Meeting"), call: tr("שיחה", "Call"), follow_up: tr("מעקב", "Follow-up") };
 
 // One extraction at a time, ever. Prevents duplicate items and keeps within API rate limits.
 let queue = Promise.resolve();
@@ -62,19 +63,19 @@ function applyItem(it, chatId, chatName, existing) {
     if (it.action !== "create") return 0; // update/cancel/done pointing at nothing we know
     const id = store.insertItem(base);
     console.log(`  + [${it.type}] ${it.title}${it.when_iso ? " @ " + it.when_iso : ""}  (${chatName})`);
-    notify(`${TYPE_HE[it.type]} חדש/ה: ${it.title}`, `${it.when_text || it.when_iso || "בלי תאריך"} · ${chatName}`);
+    notify(tr(`${TYPE_HE[it.type]} חדש/ה: ${it.title}`, `New ${TYPE_HE[it.type].toLowerCase()}: ${it.title}`), `${it.when_text || it.when_iso || tr("בלי תאריך", "No date")} · ${chatName}`);
     return 1;
   }
   if (it.action === "update") {
     store.updateItem(target.id, { ...base, notes: it.notes ?? target.notes, location: it.location ?? target.location });
     console.log(`  ~ [${it.type}] ${it.title} -> ${it.when_iso ?? "no date"}  (${chatName})`);
-    notify(`עודכן: ${it.title}`, `${it.when_text || it.when_iso || "בלי תאריך"} · ${chatName}`);
+    notify(tr(`עודכן: ${it.title}`, `Updated: ${it.title}`), `${it.when_text || it.when_iso || tr("בלי תאריך", "No date")} · ${chatName}`);
     return 1;
   }
   if (it.action === "cancel" || it.action === "done") {
     store.setStatus(target.id, it.action === "cancel" ? "cancelled" : "done", it.source_quote);
     console.log(`  x [${it.action}] ${target.title}  (${chatName})`);
-    notify(`${it.action === "cancel" ? "בוטל" : "בוצע"}: ${target.title}`, chatName);
+    notify(`${it.action === "cancel" ? tr("בוטל", "Cancelled") : tr("בוצע", "Done")}: ${target.title}`, chatName);
     return 1;
   }
   return 0;

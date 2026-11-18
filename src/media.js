@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { DATA_DIR, config } from "./config.js";
 import * as store from "./db.js";
 import { getClient, state } from "./whatsapp.js";
+import { tr } from "./i18n.js";
 
 export const MEDIA_DIR = path.join(DATA_DIR, "media");
 fs.mkdirSync(MEDIA_DIR, { recursive: true });
@@ -50,7 +51,7 @@ async function drain() {
         const msg = String(e.message);
         console.warn(`[media] ${id.slice(-24)}: ${msg.slice(0, 100)}`);
         const friendly = /timed out|unavailable|expired/i.test(msg)
-          ? "וואטסאפ לא סיפק את הקובץ (הודעה ישנה או הטלפון לא זמין)"
+          ? tr("וואטסאפ לא סיפק את הקובץ (הודעה ישנה או הטלפון לא זמין)", "WhatsApp didn't provide the file (an old message, or the phone isn't available)")
           : msg.slice(0, 200);
         store.saveMedia({ msg_id: id, status: "failed", error: friendly });
       } finally {
@@ -121,7 +122,7 @@ export function maintainAutoMedia() {
     for (const f of [row.path, row.thumb, path.join(MEDIA_DIR, `${safe}.ogg`), path.join(MEDIA_DIR, `${safe}.thumb.jpg`)]) {
       try { if (f) fs.rmSync(f, { force: true }); } catch {}
     }
-    store.saveMedia({ msg_id: row.msg_id, status: "expired", error: `נמחק מהמחשב אחרי ${days} ימים` });
+    store.saveMedia({ msg_id: row.msg_id, status: "expired", error: tr(`נמחק מהמחשב אחרי ${days} ימים`, `Deleted from this Mac after ${days} days`) });
     n++;
   }
   if (n) console.log(`[media] deleted ${n} voice notes / pictures older than ${days} days`);
