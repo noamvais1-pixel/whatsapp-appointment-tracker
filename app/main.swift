@@ -5,7 +5,9 @@ import WebKit
 // then shows http://localhost:PORT in a WebKit view. Closing the window does NOT stop the
 // tracker - it keeps reading messages in the background.
 
-let projectDir = "/Users/miriamweiss/Desktop/appointment tracker"
+// A second copy of the app (for a second phone) names its own project folder in Info.plist (ProjectDir).
+let projectDir = (Bundle.main.object(forInfoDictionaryKey: "ProjectDir") as? String) ?? "/Users/miriamweiss/Desktop/appointment tracker"
+let windowTitle = (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String) ?? "מעקב פגישות"
 let launchScript = projectDir + "/launch.sh"
 
 func readPort() -> String {
@@ -30,7 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
 
         let rect = NSRect(x: 0, y: 0, width: 1100, height: 760)
         window = NSWindow(contentRect: rect, styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
-        window.title = "מעקב פגישות"
+        window.title = windowTitle
         // Liquid-glass feel: the desktop shows through a frosted layer behind the page
         window.titlebarAppearsTransparent = true
         window.isOpaque = false
