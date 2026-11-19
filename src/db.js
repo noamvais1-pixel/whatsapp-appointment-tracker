@@ -122,6 +122,7 @@ const stmts = {
   autoMediaToFetch: db.prepare(
     `SELECT m.id FROM messages m LEFT JOIN media md ON md.msg_id = m.id
       WHERE m.media_type IN (SELECT value FROM json_each(?)) AND m.ts >= ? AND (md.msg_id IS NULL OR md.status = 'thumb')
+        AND m.chat_id != 'status@broadcast'
       ORDER BY m.ts DESC`,
   ),
   oldAutoMedia: db.prepare(
@@ -171,7 +172,7 @@ const stmts = {
   chatByPhone: db.prepare(`SELECT chat_id FROM contacts WHERE phone = ? ORDER BY updated_at DESC LIMIT 1`),
   chatSummaries: db.prepare(
     `SELECT m.chat_id AS id, m.chat_name AS name, m.ts AS timestamp, m.body AS last_body, m.from_me AS last_from_me
-       FROM messages m JOIN (SELECT chat_id, MAX(ts) AS mts FROM messages GROUP BY chat_id) x
+       FROM messages m JOIN (SELECT chat_id, MAX(ts) AS mts FROM messages WHERE chat_id != 'status@broadcast' GROUP BY chat_id) x
          ON m.chat_id = x.chat_id AND m.ts = x.mts ORDER BY m.ts DESC`,
   ),
   lastMessagePerChat: db.prepare(
@@ -279,8 +280,12 @@ export function wipeAll() {
 }
 export const lastMessagePerChat = () => stmts.lastMessagePerChat.all();
 export const chatSummaries = () => stmts.chatSummaries.all();
-const lastInChat = db.prepare(`SELECT * FROM messages WHERE chat_id = ? ORDER BY ts DESC LIMIT 1`);
-export const lastMessageIn = (chatId) => lastInChat.get(chatId);
+// Status updates are stored under one id; sender holds the poster's WhatsApp id.
+const statusRows = db.prepare(
+  `SELECT m.*, md.status AS media_status, md.mimetype AS media_mime, md.filename AS media_filename, md.size AS media_size, md.error AS media_error, (md.thumb IS NOT NULL) AS media_thumb
+     FROM messages m LEFT JOIN media md ON md.msg_id = m.id WHERE m.chat_id = 'status@broadcast' AND m.from_me = 0 ORDER BY m.ts`,
+);
+export const allStatuses = () => statusRows.all();
 export const getPhone = (chatId) => stmts.getPhone.get(chatId);
 export const setPhone = (chatId, phone) => stmts.setPhone.run(chatId, phone ?? null);
 export const chatByPhone = (digits) => stmts.chatByPhone.get(digits)?.chat_id || null;

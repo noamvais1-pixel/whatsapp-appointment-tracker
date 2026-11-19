@@ -127,7 +127,7 @@ export function storeRecord(rec, processed = 0) {
   if (rec.thumb || (isNew && rec.mediaType)) {
     import("./media.js").then((m) => {
       if (rec.thumb) m.rememberThumb(rec); // shown until the full picture arrives
-      if (isNew) m.autoDownload(rec);
+      if (isNew && rec.chatId !== STATUS_ID) m.autoDownload(rec); // statuses download only when opened
     });
   }
   return isNew;
@@ -195,6 +195,7 @@ export async function fetchStatuses() {
     if (rec && storeRecord(rec, 1)) added++;
   }
   if (added) console.log(`[status] ${added} new status updates`);
+  resolvePhones([...new Set(store.allStatuses().map((m) => m.sender).filter((id) => id?.endsWith("@lid")))]); // in the background
   return added;
 }
 
@@ -598,8 +599,6 @@ export async function listChats() {
           last_from_me: !!c.lastMessage?.fromMe,
         }))
         .sort((a, b) => b.timestamp - a.timestamp);
-      const st = statusEntry();
-      if (st) list.unshift(st);
       chatListCache = { at: Date.now(), list };
       reportRead(true);
       resolvePhones(list.filter((c) => !c.isGroup && !c.phone).map((c) => c.id)); // in the background
@@ -609,15 +608,22 @@ export async function listChats() {
       reportRead(false, e);
     }
   }
-  const st = statusEntry();
-  const rest = store.chatSummaries().filter((c) => c.id !== STATUS_ID).map((c) => ({ ...c, name: contactName(c.id, c.name), phone: phoneFor(c.id), isGroup: false, unread: 0, last_from_me: !!c.last_from_me }));
-  return st ? [st, ...rest] : rest;
+  return store.chatSummaries().map((c) => ({ ...c, name: contactName(c.id, c.name), phone: phoneFor(c.id), isGroup: false, unread: 0, last_from_me: !!c.last_from_me }));
 }
-/** The "Statuses" row pinned at the top of the chat list (always shown, even before any status was saved). */
-function statusEntry() {
-  const last = store.lastMessageIn(STATUS_ID);
-  return { id: STATUS_ID, name: STATUS_NAME, phone: "", isGroup: false, isStatus: true, timestamp: last?.ts || 0, unread: 0,
-    last_body: last ? last.body : "", last_from_me: !!last?.from_me };
+
+/** One contact's statuses. A status names its poster by phone (@c.us) or by WhatsApp's internal id (@lid), the chat may use the other. */
+const digitsOf = (id) => (id.endsWith("@c.us") ? id.replace(/@.*$/, "") : store.getPhone(id)?.phone || "");
+export function statusesOf(chatId) {
+  if (!chatId || chatId.endsWith("@g.us") || chatId === STATUS_ID) return [];
+  const phone = digitsOf(chatId);
+  return store.allStatuses().filter((m) => m.sender === chatId || (phone && digitsOf(m.sender || "") === phone));
+}
+let statusesReadAt = 0;
+/** fetchStatuses at most once a minute (a chat refreshes every few seconds). */
+export async function refreshStatuses() {
+  if (Date.now() - statusesReadAt < 60000) return;
+  statusesReadAt = Date.now();
+  try { await fetchStatuses(); } catch (e) { console.warn(`[status] could not read statuses: ${String(e.message).slice(0, 120)}`); }
 }
 
 async function fetchWithRetry(chat, opts) {

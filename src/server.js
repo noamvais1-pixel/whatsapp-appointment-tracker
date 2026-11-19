@@ -199,11 +199,9 @@ export function startServer(getClient) {
   app.get("/api/chats/:chatId/messages", async (req, res) => {
     const chatId = req.params.chatId;
     const client = getClient?.();
-    const isStatus = chatId === "status@broadcast";
-    if (isStatus && client && state.status === "ready") {
-      try { await (await import("./whatsapp.js")).fetchStatuses(); }
-      catch (e) { console.warn(`[status] could not read statuses: ${String(e.message).slice(0, 120)}`); }
-    } else if (client && state.status === "ready" && !state.backfill) {
+    const wa = await import("./whatsapp.js");
+    if (client && state.status === "ready") wa.refreshStatuses(); // in the background; the count shows on the next refresh
+    if (client && state.status === "ready" && !state.backfill) {
       try {
         const { toRecord, storeRecord } = await import("./whatsapp.js");
         const chat = await client.getChatById(chatId);
@@ -219,11 +217,22 @@ export function startServer(getClient) {
     const messages = store.recentMessages(chatId, 80);
     if (messages.length) store.markSeenHere(chatId, messages[messages.length - 1].ts); // opened here: no more "new" circle (WhatsApp is not told)
     for (const m of messages) if (m.media_type && isQueued(m.id)) m.media_status = "downloading";
-    if (chatId.endsWith("@g.us") || isStatus) await nameGroupSenders(client, messages);
-    if (isStatus) return res.json({ chatId, phone: "", messages, isStatus: true });
+    if (chatId.endsWith("@g.us")) await nameGroupSenders(client, messages);
     let phone = phoneFor(chatId);
     if (!phone && !chatId.endsWith("@g.us")) { await resolvePhones([chatId]); phone = phoneFor(chatId); }
-    res.json({ chatId, phone, messages });
+    res.json({ chatId, phone, messages, statuses: wa.statusesOf(chatId).length });
+  });
+  // One contact's statuses. Opening them downloads their pictures and videos (only theirs, nothing else).
+  app.get("/api/chats/:chatId/statuses", async (req, res) => {
+    const { statusesOf, refreshStatuses } = await import("./whatsapp.js");
+    if (getClient?.() && state.status === "ready") await refreshStatuses();
+    const messages = statusesOf(req.params.chatId);
+    for (const m of messages) {
+      m.sender = "";
+      if (m.media_type && m.media_type !== "sticker" && (!m.media_status || m.media_status === "thumb")) requestMedia(m.id);
+      if (m.media_type && isQueued(m.id)) m.media_status = "downloading";
+    }
+    res.json({ chatId: req.params.chatId, messages });
   });
   // Diagnostic: what WhatsApp attaches to a raw message (used to locate preview thumbnails). Local only.
   app.get("/api/debug/msg/:id", async (req, res) => {
@@ -664,6 +673,7 @@ const PAGE = /* html */ `<!doctype html>
   @media (forced-colors: active){ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid CanvasText;outline-offset:2px} }
   [role="button"]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #panel.stview .compose,#panel.stview #replybar{display:none!important}
+body.chats #panel .ph button.pst,.ph .pst{display:inline-block;white-space:nowrap}.ph .pst[hidden],body.chats #panel .ph button.pst[hidden]{display:none}
 </style></head><body>
 <header><h1>פגישות ומעקבים</h1><div id="accts" class="accts" role="group" aria-label="החלפה בין טלפונים" hidden></div><span id="status" class="pill">…</span><span id="bf" class="stat"></span><span class="grow"></span>
 <div id="hdracts"><button id="checkbtn" onclick="checkNow()">לבדוק הודעות חדשות עכשיו</button><button onclick="openDigest()">סדר היום</button><button onclick="checkUpdates()" title="לבדוק אם יש גרסה חדשה ב-GitHub ולהתקין אותה">בדיקת עדכונים</button><button id="switchbtn" onclick="switchPhone()">החלפת טלפון</button><button onclick="quitApp()" title="לעצור את התוכנה">יציאה</button></div></header>
@@ -686,7 +696,7 @@ const PAGE = /* html */ `<!doctype html>
 </div>
 <div id="chatsview"><div class="clist"><div class="csrow"><input id="csearch" type="search" aria-label="חיפוש צ'אט" spellcheck="false" autocorrect="off" placeholder="חיפוש צ'אט או מספר טלפון…" oninput="renderChats()"><button class="newchat" title="צ'אט חדש לפי מספר טלפון" onclick="newChatPrompt()">＋ מספר</button></div><div class="cl" id="clist"></div></div><div id="cslot" class="cempty">בוחרים צ'אט מהרשימה</div></div>
 </main>
-<div id="panel"><div class="ph"><b id="pname"><span id="pname-t"></span><span class="pn" id="pphone"></span></b><span id="pstatus" class="stat"></span><button onclick="closeChat()">סגירה</button></div>
+<div id="panel"><div class="ph"><b id="pname"><span id="pname-t"></span><span class="pn" id="pphone"></span></b><span id="pstatus" class="stat"></span><button id="pst" class="pst" hidden onclick="toggleStatuses()">📢 סטטוסים</button><button onclick="closeChat()">סגירה</button></div>
 <div class="msgs" id="pmsgs"></div><div class="sent" id="psent" role="status"></div>
 <div class="selbar" id="pselbar" hidden><span class="nm" id="pseln"></span><button class="primary" onclick="fwdSelected()">↪️ העברה</button><button onclick="endSelect()">ביטול</button></div><div class="replybar" id="preply" hidden></div><div class="attach" id="pattach" hidden></div>
 <div class="spell" id="pspell" hidden></div>
@@ -798,14 +808,14 @@ async function openChat(itemId){ const it=S.items.find(i=>i.id===itemId); if(!it
   await showChat({chatId:it.chat_id,name:it.chat_name||it.who||it.chat_id,msgId:it.source_msg_id}); }
 async function showChat(c){ if(cur?.chatId!==c.chatId){ clearReply(); endSelect(); } cur=c; const panel=document.getElementById('panel');
   if(isChatView(view)&&panel.parentElement===document.body){ const slot=document.getElementById('cslot'); if(slot) slot.replaceWith(panel); }
-  panel.classList.toggle('stview',c.chatId==='status@broadcast');
-  document.getElementById('pname-t').textContent=cur.name; document.getElementById('pphone').textContent=c.chatId==='status@broadcast'?'הסטטוסים של אנשי הקשר שלך. בוואטסאפ הם נעלמים אחרי 24 שעות, כאן הם נשמרים.':''; document.getElementById('pmsgs').innerHTML='<div class="stat">טוען…</div>';
+  panel.classList.remove('stview'); document.getElementById('pst').hidden=true;
+  document.getElementById('pname-t').textContent=cur.name; document.getElementById('pphone').textContent=''; document.getElementById('pmsgs').innerHTML='<div class="stat">טוען…</div>';
   panel.classList.add('open'); await loadChat(true); clearInterval(ptimer); ptimer=setInterval(()=>loadChat(false),8000); document.getElementById('ptext').focus(); }
 // edit / delete menu on a message bubble
 let pmsgs={};
 function msgMenu(e){ e.stopPropagation(); const id=e.target.closest('.b').dataset.id, m=pmsgs[id]; if(!m) return; closeMsgMenu();
   const age=Date.now()/1000-m.ts, opts=[];
-  if(!m.deleted_at&&cur.chatId!=='status@broadcast') opts.push(['↩️ תגובה',()=>replyMsg(m)]);
+  if(!m.deleted_at&&!cur.statuses) opts.push(['↩️ תגובה',()=>replyMsg(m)]);
   if(!m.deleted_at) opts.push(['↪️ העברה',()=>fwdMsg(m)],['☑️ בחירת כמה הודעות להעברה',()=>startSelect(m)]);
   if(m.from_me&&!m.deleted_at) opts.push(['👁 מי קרא',()=>readInfo(m)]);
   if(m.from_me&&!m.deleted_at&&!m.media_type&&age<15*60) opts.push(['✏️ עריכה',()=>editMsg(m)]);
@@ -897,8 +907,13 @@ function delMsg(m,everyone){ if(!confirm(m.deleted_at&&!everyone?'להסיר א�
   msgAction(m,'delete',{everyone},'WhatsApp מאפשר למחוק אצל כולם רק בערך יומיים אחרי השליחה. אפשר עדיין למחוק רק אצלך.'); }
 function closeChat(){ cancelRec(); clearReply(); document.getElementById('panel').classList.remove('open'); clearInterval(ptimer); cur=null; }
 setView(view);
-async function loadChat(scroll){ if(!cur) return; const id=cur.chatId; let d; try{ d=await (await fetch('/api/chats/'+encodeURIComponent(id)+'/messages')).json(); }catch{ return; } if(!cur||cur.chatId!==id) return;
-  if(d.isStatus&&!d.messages.length){ document.getElementById('pmsgs').innerHTML='<div class="stat">עדיין אין סטטוסים. סטטוסים חדשים שאנשי הקשר שלך מעלים יופיעו כאן.</div>'; return; }
+// a contact's statuses, opened from the 📢 button in their chat (and back to the chat with the same button)
+function toggleStatuses(){ if(!cur) return; cur.statuses=!cur.statuses; const b=document.getElementById('pst');
+  b.textContent=cur.statuses?'💬 חזרה לצ\'אט':'📢 סטטוסים'+(cur.stCount?' ('+cur.stCount+')':''); document.getElementById('panel').classList.toggle('stview',cur.statuses);
+  const box=document.getElementById('pmsgs'); box.dataset.sig=''; box.innerHTML='<div class="stat">טוען…</div>'; endSelect(); clearReply(); loadChat(true); }
+async function loadChat(scroll){ if(!cur) return; const id=cur.chatId, st=!!cur.statuses; let d; try{ d=await (await fetch('/api/chats/'+encodeURIComponent(id)+(st?'/statuses':'/messages'))).json(); }catch{ return; } if(!cur||cur.chatId!==id||!!cur.statuses!==st) return;
+  if(!st){ cur.stCount=d.statuses||0; const b=document.getElementById('pst'); b.hidden=!cur.stCount; b.textContent='📢 סטטוסים ('+cur.stCount+')'; }
+  if(st&&!d.messages.length){ document.getElementById('pmsgs').innerHTML='<div class="stat">אין סטטוסים שמורים מאיש הקשר הזה.</div>'; return; }
   if(d.phone&&d.phone!==cur.name) document.getElementById('pphone').textContent=d.phone;
   const box=document.getElementById('pmsgs'); const atBottom=box.scrollHeight-box.scrollTop-box.clientHeight<40;
   // never rebuild the list while a voice note or video is playing (it would restart it), and only rebuild when something changed
