@@ -220,19 +220,23 @@ export function startServer(getClient) {
     if (chatId.endsWith("@g.us")) await nameGroupSenders(client, messages);
     let phone = phoneFor(chatId);
     if (!phone && !chatId.endsWith("@g.us")) { await resolvePhones([chatId]); phone = phoneFor(chatId); }
-    res.json({ chatId, phone, messages, statuses: wa.statusesOf(chatId).length });
+    const sts = wa.statusesOf(chatId), seen = Number(store.getMeta("status_seen:" + chatId) || 0);
+    res.json({ chatId, phone, messages, statuses: sts.length, unseenStatuses: sts.filter((m) => m.ts > seen).length });
   });
   // One contact's statuses. Opening them downloads their pictures and videos (only theirs, nothing else).
   app.get("/api/chats/:chatId/statuses", async (req, res) => {
     const { statusesOf, refreshStatuses } = await import("./whatsapp.js");
     if (getClient?.() && state.status === "ready") await refreshStatuses();
     const messages = statusesOf(req.params.chatId);
+    // seen on the dashboard: statuses newer than this were not opened before (shown bold this time, regular after)
+    const key = "status_seen:" + req.params.chatId, seenBefore = Number(store.getMeta(key) || 0);
+    if (messages.length && messages.at(-1).ts > seenBefore) store.setMeta(key, messages.at(-1).ts);
     for (const m of messages) {
       m.sender = "";
       if (m.media_type && m.media_type !== "sticker" && (!m.media_status || m.media_status === "thumb")) requestMedia(m.id);
       if (m.media_type && isQueued(m.id)) m.media_status = "downloading";
     }
-    res.json({ chatId: req.params.chatId, messages });
+    res.json({ chatId: req.params.chatId, messages, seenBefore });
   });
   // Diagnostic: what WhatsApp attaches to a raw message (used to locate preview thumbnails). Local only.
   app.get("/api/debug/msg/:id", async (req, res) => {
@@ -673,7 +677,7 @@ const PAGE = /* html */ `<!doctype html>
   @media (forced-colors: active){ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid CanvasText;outline-offset:2px} }
   [role="button"]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #panel.stview .compose,#panel.stview #replybar{display:none!important}
-body.chats #panel .ph button.pst,.ph .pst{display:inline-block;white-space:nowrap}.ph .pst[hidden],body.chats #panel .ph button.pst[hidden]{display:none}
+body.chats #panel .ph button.pst,.ph .pst{display:inline-block;white-space:nowrap}.ph .pst[hidden],body.chats #panel .ph button.pst[hidden]{display:none}.ph .pst{font-weight:400}.ph .pst.new{font-weight:800}.b.unseen .tx,.b.unseen .t{font-weight:800}
 </style></head><body>
 <header><h1>פגישות ומעקבים</h1><div id="accts" class="accts" role="group" aria-label="החלפה בין טלפונים" hidden></div><span id="status" class="pill">…</span><span id="bf" class="stat"></span><span class="grow"></span>
 <div id="hdracts"><button id="checkbtn" onclick="checkNow()">לבדוק הודעות חדשות עכשיו</button><button onclick="openDigest()">סדר היום</button><button onclick="checkUpdates()" title="לבדוק אם יש גרסה חדשה ב-GitHub ולהתקין אותה">בדיקת עדכונים</button><button id="switchbtn" onclick="switchPhone()">החלפת טלפון</button><button onclick="quitApp()" title="לעצור את התוכנה">יציאה</button></div></header>
@@ -908,11 +912,12 @@ function delMsg(m,everyone){ if(!confirm(m.deleted_at&&!everyone?'להסיר א�
 function closeChat(){ cancelRec(); clearReply(); document.getElementById('panel').classList.remove('open'); clearInterval(ptimer); cur=null; }
 setView(view);
 // a contact's statuses, opened from the 📢 button in their chat (and back to the chat with the same button)
-function toggleStatuses(){ if(!cur) return; cur.statuses=!cur.statuses; const b=document.getElementById('pst');
+function toggleStatuses(){ if(!cur) return; cur.statuses=!cur.statuses; cur.stSeen=null; const b=document.getElementById('pst'); if(cur.statuses){ b.classList.remove('new'); cur.stUnseen=0; }
   b.textContent=cur.statuses?'💬 חזרה לצ\\'אט':'📢 סטטוסים'+(cur.stCount?' ('+cur.stCount+')':''); document.getElementById('panel').classList.toggle('stview',cur.statuses);
   const box=document.getElementById('pmsgs'); box.dataset.sig=''; box.innerHTML='<div class="stat">טוען…</div>'; endSelect(); clearReply(); loadChat(true); }
 async function loadChat(scroll){ if(!cur) return; const id=cur.chatId, st=!!cur.statuses; let d; try{ d=await (await fetch('/api/chats/'+encodeURIComponent(id)+(st?'/statuses':'/messages'))).json(); }catch{ return; } if(!cur||cur.chatId!==id||!!cur.statuses!==st) return;
-  if(!st){ cur.stCount=d.statuses||0; const b=document.getElementById('pst'); b.hidden=!cur.stCount; b.textContent='📢 סטטוסים ('+cur.stCount+')'; }
+  if(!st){ cur.stCount=d.statuses||0; const b=document.getElementById('pst'); b.hidden=!cur.stCount; b.textContent='📢 סטטוסים ('+cur.stCount+')';  cur.stUnseen=d.unseenStatuses||0; b.classList.toggle('new',cur.stUnseen>0); }
+  if(st&&cur.stSeen==null) cur.stSeen=d.seenBefore||0; // remembered for this opening, so new ones stay bold while looking
   if(st&&!d.messages.length){ document.getElementById('pmsgs').innerHTML='<div class="stat">אין סטטוסים שמורים מאיש הקשר הזה.</div>'; return; }
   if(d.phone&&d.phone!==cur.name) document.getElementById('pphone').textContent=d.phone;
   const box=document.getElementById('pmsgs'); const atBottom=box.scrollHeight-box.scrollTop-box.clientHeight<40;
@@ -922,7 +927,7 @@ async function loadChat(scroll){ if(!cur) return; const id=cur.chatId, st=!!cur.
   if(!scroll&&sig===box.dataset.sig) return;
   box.dataset.sig=sig;
   pmsgs={}; for(const m of d.messages) pmsgs[m.id]=m; { const c=chats.find(x=>x.id===cur.chatId); if(c&&c.unread){ c.unread=0; if(isChatView(view)) renderChats(); } }
-  box.innerHTML=d.messages.map(m=>'<div class="b '+(m.from_me?'me':'')+(m.id===cur.msgId?' hl':'')+(m.deleted_at?' del':'')+(selIds.has(m.id)?' sel':'')+'" data-id="'+esc(m.id)+'"><button class="mact" onclick="msgMenu(event)" title="תגובה, העברה, עריכה או מחיקה" aria-label="פעולות להודעה">⋯</button>'+quoteHtml(m,d.messages)+mediaHtml(m)+contactHtml(m)+(bodyText(m)?'<div class="tx">'+esc(bodyText(m))+'</div>':'')+(m.deleted_at?'<span class="flag">🚫 '+(m.from_me?'מחקת את ההודעה הזאת':'נמחקה על ידי השולח')+(m.deleted_at==='unknown'?'':' · '+esc(new Date(m.deleted_at.replace(' ','T')+'Z').toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})))+' · הטקסט נשמר כאן</span>':'')+(m.edited_from?'<span class="flag ed" title="'+esc('לפני העריכה: '+m.edited_from)+'">✏️ נערכה (להצגת המקור: לרחף)</span>':'')+'<span class="t">'+(m.from_me?'':esc(m.sender||'')+' · ')+new Date(m.ts*1000).toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+ticks(m)+'</span></div>').join('')||'<div class="stat">עדיין אין הודעות שמורות לצ\\'אט הזה.</div>';
+  box.innerHTML=d.messages.map(m=>'<div class="b '+(m.from_me?'me':'')+(st&&m.ts>cur.stSeen?' unseen':'')+(m.id===cur.msgId?' hl':'')+(m.deleted_at?' del':'')+(selIds.has(m.id)?' sel':'')+'" data-id="'+esc(m.id)+'"><button class="mact" onclick="msgMenu(event)" title="תגובה, העברה, עריכה או מחיקה" aria-label="פעולות להודעה">⋯</button>'+quoteHtml(m,d.messages)+mediaHtml(m)+contactHtml(m)+(bodyText(m)?'<div class="tx">'+esc(bodyText(m))+'</div>':'')+(m.deleted_at?'<span class="flag">🚫 '+(m.from_me?'מחקת את ההודעה הזאת':'נמחקה על ידי השולח')+(m.deleted_at==='unknown'?'':' · '+esc(new Date(m.deleted_at.replace(' ','T')+'Z').toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})))+' · הטקסט נשמר כאן</span>':'')+(m.edited_from?'<span class="flag ed" title="'+esc('לפני העריכה: '+m.edited_from)+'">✏️ נערכה (להצגת המקור: לרחף)</span>':'')+'<span class="t">'+(m.from_me?'':esc(m.sender||'')+' · ')+new Date(m.ts*1000).toLocaleString(L,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+ticks(m)+'</span></div>').join('')||'<div class="stat">עדיין אין הודעות שמורות לצ\\'אט הזה.</div>';
   if(scroll||atBottom) box.scrollTop=box.scrollHeight; }
 function fmtSize(n){ if(!n) return ''; return n>1048576?(n/1048576).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB'; }
 // a shared contact card: name, number, and a button that opens a chat with that number
