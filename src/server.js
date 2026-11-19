@@ -199,7 +199,11 @@ export function startServer(getClient) {
   app.get("/api/chats/:chatId/messages", async (req, res) => {
     const chatId = req.params.chatId;
     const client = getClient?.();
-    if (client && state.status === "ready" && !state.backfill) {
+    const isStatus = chatId === "status@broadcast";
+    if (isStatus && client && state.status === "ready") {
+      try { await (await import("./whatsapp.js")).fetchStatuses(); }
+      catch (e) { console.warn(`[status] could not read statuses: ${String(e.message).slice(0, 120)}`); }
+    } else if (client && state.status === "ready" && !state.backfill) {
       try {
         const { toRecord, storeRecord } = await import("./whatsapp.js");
         const chat = await client.getChatById(chatId);
@@ -215,7 +219,8 @@ export function startServer(getClient) {
     const messages = store.recentMessages(chatId, 80);
     if (messages.length) store.markSeenHere(chatId, messages[messages.length - 1].ts); // opened here: no more "new" circle (WhatsApp is not told)
     for (const m of messages) if (m.media_type && isQueued(m.id)) m.media_status = "downloading";
-    if (chatId.endsWith("@g.us")) await nameGroupSenders(client, messages);
+    if (chatId.endsWith("@g.us") || isStatus) await nameGroupSenders(client, messages);
+    if (isStatus) return res.json({ chatId, phone: "", messages, isStatus: true });
     let phone = phoneFor(chatId);
     if (!phone && !chatId.endsWith("@g.us")) { await resolvePhones([chatId]); phone = phoneFor(chatId); }
     res.json({ chatId, phone, messages });
@@ -658,6 +663,7 @@ const PAGE = /* html */ `<!doctype html>
   /* box-shadow focus rings disappear in Forced Colors / High Contrast mode: fall back to a real outline there */
   @media (forced-colors: active){ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid CanvasText;outline-offset:2px} }
   [role="button"]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#panel.stview .compose,#panel.stview #replybar{display:none!important}
 </style></head><body>
 <header><h1>פגישות ומעקבים</h1><div id="accts" class="accts" role="group" aria-label="החלפה בין טלפונים" hidden></div><span id="status" class="pill">…</span><span id="bf" class="stat"></span><span class="grow"></span>
 <div id="hdracts"><button id="checkbtn" onclick="checkNow()">לבדוק הודעות חדשות עכשיו</button><button onclick="openDigest()">סדר היום</button><button onclick="checkUpdates()" title="לבדוק אם יש גרסה חדשה ב-GitHub ולהתקין אותה">בדיקת עדכונים</button><button id="switchbtn" onclick="switchPhone()">החלפת טלפון</button><button onclick="quitApp()" title="לעצור את התוכנה">יציאה</button></div></header>
@@ -792,13 +798,15 @@ async function openChat(itemId){ const it=S.items.find(i=>i.id===itemId); if(!it
   await showChat({chatId:it.chat_id,name:it.chat_name||it.who||it.chat_id,msgId:it.source_msg_id}); }
 async function showChat(c){ if(cur?.chatId!==c.chatId){ clearReply(); endSelect(); } cur=c; const panel=document.getElementById('panel');
   if(isChatView(view)&&panel.parentElement===document.body){ const slot=document.getElementById('cslot'); if(slot) slot.replaceWith(panel); }
-  document.getElementById('pname-t').textContent=cur.name; document.getElementById('pphone').textContent=''; document.getElementById('pmsgs').innerHTML='<div class="stat">טוען…</div>';
+  panel.classList.toggle('stview',c.chatId==='status@broadcast');
+  document.getElementById('pname-t').textContent=cur.name; document.getElementById('pphone').textContent=c.chatId==='status@broadcast'?'הסטטוסים של אנשי הקשר שלך. בוואטסאפ הם נעלמים אחרי 24 שעות, כאן הם נשמרים.':''; document.getElementById('pmsgs').innerHTML='<div class="stat">טוען…</div>';
   panel.classList.add('open'); await loadChat(true); clearInterval(ptimer); ptimer=setInterval(()=>loadChat(false),8000); document.getElementById('ptext').focus(); }
 // edit / delete menu on a message bubble
 let pmsgs={};
 function msgMenu(e){ e.stopPropagation(); const id=e.target.closest('.b').dataset.id, m=pmsgs[id]; if(!m) return; closeMsgMenu();
   const age=Date.now()/1000-m.ts, opts=[];
-  if(!m.deleted_at) opts.push(['↩️ תגובה',()=>replyMsg(m)],['↪️ העברה',()=>fwdMsg(m)],['☑️ בחירת כמה הודעות להעברה',()=>startSelect(m)]);
+  if(!m.deleted_at&&cur.chatId!=='status@broadcast') opts.push(['↩️ תגובה',()=>replyMsg(m)]);
+  if(!m.deleted_at) opts.push(['↪️ העברה',()=>fwdMsg(m)],['☑️ בחירת כמה הודעות להעברה',()=>startSelect(m)]);
   if(m.from_me&&!m.deleted_at) opts.push(['👁 מי קרא',()=>readInfo(m)]);
   if(m.from_me&&!m.deleted_at&&!m.media_type&&age<15*60) opts.push(['✏️ עריכה',()=>editMsg(m)]);
   if(m.from_me&&!m.deleted_at&&age<60*3600) opts.push(['🗑 מחיקה אצל כולם',()=>delMsg(m,true)]);
@@ -890,6 +898,7 @@ function delMsg(m,everyone){ if(!confirm(m.deleted_at&&!everyone?'להסיר א�
 function closeChat(){ cancelRec(); clearReply(); document.getElementById('panel').classList.remove('open'); clearInterval(ptimer); cur=null; }
 setView(view);
 async function loadChat(scroll){ if(!cur) return; const id=cur.chatId; let d; try{ d=await (await fetch('/api/chats/'+encodeURIComponent(id)+'/messages')).json(); }catch{ return; } if(!cur||cur.chatId!==id) return;
+  if(d.isStatus&&!d.messages.length){ document.getElementById('pmsgs').innerHTML='<div class="stat">עדיין אין סטטוסים. סטטוסים חדשים שאנשי הקשר שלך מעלים יופיעו כאן.</div>'; return; }
   if(d.phone&&d.phone!==cur.name) document.getElementById('pphone').textContent=d.phone;
   const box=document.getElementById('pmsgs'); const atBottom=box.scrollHeight-box.scrollTop-box.clientHeight<40;
   // never rebuild the list while a voice note or video is playing (it would restart it), and only rebuild when something changed

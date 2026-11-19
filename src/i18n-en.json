@@ -247,5 +247,7 @@
   [" (הספקתי להעביר ", " (forwarded "],
   [" מתוך ", " of "],
   ["🗑 להסיר מכאן", "🗑 Remove from here"],
-  ["להסיר את ההודעה מכאן? היא כבר נמחקה ב-WhatsApp, וההעתק ששמרנו כאן יימחק.", "Remove this message from here? It’s already deleted in WhatsApp, and the copy kept here will be removed."]
+  ["להסיר את ההודעה מכאן? היא כבר נמחקה ב-WhatsApp, וההעתק ששמרנו כאן יימחק.", "Remove this message from here? It’s already deleted in WhatsApp, and the copy kept here will be removed."],
+  ["הסטטוסים של אנשי הקשר שלך. בוואטסאפ הם נעלמים אחרי 24 שעות, כאן הם נשמרים.", "Your contacts’ status updates. WhatsApp removes them after 24 hours; here they are kept."],
+  ["עדיין אין סטטוסים. סטטוסים חדשים שאנשי הקשר שלך מעלים יופיעו כאן.", "No status updates yet. New ones your contacts post will show up here."]
 ]

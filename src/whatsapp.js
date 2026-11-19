@@ -156,6 +156,48 @@ export function toRecord(msg, chat) {
   };
 }
 
+// Status updates (סטטוסים): kept as one read-only "chat" so they show on the dashboard, never scanned for appointments.
+export const STATUS_ID = "status@broadcast";
+export const STATUS_NAME = tr("📢 סטטוסים", "📢 Statuses");
+export function statusRecord(msg) {
+  const body = messageText(msg);
+  if (!body || !body.trim()) return null;
+  return {
+    id: msg.id._serialized,
+    chatId: STATUS_ID,
+    chatName: STATUS_NAME,
+    fromMe: !!msg.fromMe,
+    // who posted it: their WhatsApp id, turned into a name when the chat is opened
+    sender: msg.fromMe ? "Me" : jidOf(msg.author) || msg._data?.notifyName || "Someone",
+    body,
+    ts: msg.timestamp,
+    mediaType: mediaKind(msg),
+    ack: null,
+    quote: null,
+    thumb: ["image", "video"].includes(msg.type) && typeof msg._data?.body === "string" && msg._data.body.length > 200 && !/\s/.test(msg._data.body) ? msg._data.body : null,
+  };
+}
+/** Read every status currently on WhatsApp (they disappear there after 24 hours; here they are kept). Returns how many were new. */
+export async function fetchStatuses() {
+  if (!current || state.status !== "ready") return 0;
+  const raw = await withTimeout(current.pupPage.evaluate(() => {
+    const out = [];
+    for (const s of window.require("WAWebCollections").Status.getModelsArray()) {
+      const msgs = s.msgs?.getModelsArray?.() || s._msgs?.getModelsArray?.() || [];
+      for (const m of msgs) { try { out.push(window.WWebJS.getMessageModel(m)); } catch {} }
+    }
+    return out;
+  }), 30000);
+  const { default: Message } = await import("whatsapp-web.js/src/structures/Message.js");
+  let added = 0;
+  for (const d of raw || []) {
+    const rec = statusRecord(new Message(current, d));
+    if (rec && storeRecord(rec, 1)) added++;
+  }
+  if (added) console.log(`[status] ${added} new status updates`);
+  return added;
+}
+
 let current = null;
 let readyHook = null;
 export const getClient = () => current;
@@ -367,7 +409,12 @@ function createClient({ onReady } = {}) {
   // message_create fires for both incoming and outgoing messages
   client.on("message_create", async (msg) => {
     try {
-      if (msg.isStatus || msg.from === "status@broadcast") return;
+      if (msg.isStatus || msg.from === STATUS_ID || msg.to === STATUS_ID) {
+        // a status update: keep it for the dashboard, but it is not a chat (no appointment scanning, no reply reminders)
+        const rec = msg.type === "protocol" ? null : statusRecord(msg);
+        if (rec && storeRecord(rec, 1)) console.log(`[status] ${rec.sender}: ${rec.body.slice(0, 60)}`);
+        return;
+      }
       const chat = await msg.getChat();
       if (!chatAllowed(chat)) return;
       const rec = toRecord(msg, chat);
@@ -551,6 +598,8 @@ export async function listChats() {
           last_from_me: !!c.lastMessage?.fromMe,
         }))
         .sort((a, b) => b.timestamp - a.timestamp);
+      const st = statusEntry();
+      if (st) list.unshift(st);
       chatListCache = { at: Date.now(), list };
       reportRead(true);
       resolvePhones(list.filter((c) => !c.isGroup && !c.phone).map((c) => c.id)); // in the background
@@ -560,7 +609,15 @@ export async function listChats() {
       reportRead(false, e);
     }
   }
-  return store.chatSummaries().map((c) => ({ ...c, name: contactName(c.id, c.name), phone: phoneFor(c.id), isGroup: false, unread: 0, last_from_me: !!c.last_from_me }));
+  const st = statusEntry();
+  const rest = store.chatSummaries().filter((c) => c.id !== STATUS_ID).map((c) => ({ ...c, name: contactName(c.id, c.name), phone: phoneFor(c.id), isGroup: false, unread: 0, last_from_me: !!c.last_from_me }));
+  return st ? [st, ...rest] : rest;
+}
+/** The "Statuses" row pinned at the top of the chat list (always shown, even before any status was saved). */
+function statusEntry() {
+  const last = store.lastMessageIn(STATUS_ID);
+  return { id: STATUS_ID, name: STATUS_NAME, phone: "", isGroup: false, isStatus: true, timestamp: last?.ts || 0, unread: 0,
+    last_body: last ? last.body : "", last_from_me: !!last?.from_me };
 }
 
 async function fetchWithRetry(chat, opts) {

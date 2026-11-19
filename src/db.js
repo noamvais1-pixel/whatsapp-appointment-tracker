@@ -279,6 +279,8 @@ export function wipeAll() {
 }
 export const lastMessagePerChat = () => stmts.lastMessagePerChat.all();
 export const chatSummaries = () => stmts.chatSummaries.all();
+const lastInChat = db.prepare(`SELECT * FROM messages WHERE chat_id = ? ORDER BY ts DESC LIMIT 1`);
+export const lastMessageIn = (chatId) => lastInChat.get(chatId);
 export const getPhone = (chatId) => stmts.getPhone.get(chatId);
 export const setPhone = (chatId, phone) => stmts.setPhone.run(chatId, phone ?? null);
 export const chatByPhone = (digits) => stmts.chatByPhone.get(digits)?.chat_id || null;
