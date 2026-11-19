@@ -909,7 +909,7 @@ function closeChat(){ cancelRec(); clearReply(); document.getElementById('panel'
 setView(view);
 // a contact's statuses, opened from the 📢 button in their chat (and back to the chat with the same button)
 function toggleStatuses(){ if(!cur) return; cur.statuses=!cur.statuses; const b=document.getElementById('pst');
-  b.textContent=cur.statuses?'💬 חזרה לצ\'אט':'📢 סטטוסים'+(cur.stCount?' ('+cur.stCount+')':''); document.getElementById('panel').classList.toggle('stview',cur.statuses);
+  b.textContent=cur.statuses?'💬 חזרה לצ\\'אט':'📢 סטטוסים'+(cur.stCount?' ('+cur.stCount+')':''); document.getElementById('panel').classList.toggle('stview',cur.statuses);
   const box=document.getElementById('pmsgs'); box.dataset.sig=''; box.innerHTML='<div class="stat">טוען…</div>'; endSelect(); clearReply(); loadChat(true); }
 async function loadChat(scroll){ if(!cur) return; const id=cur.chatId, st=!!cur.statuses; let d; try{ d=await (await fetch('/api/chats/'+encodeURIComponent(id)+(st?'/statuses':'/messages'))).json(); }catch{ return; } if(!cur||cur.chatId!==id||!!cur.statuses!==st) return;
   if(!st){ cur.stCount=d.statuses||0; const b=document.getElementById('pst'); b.hidden=!cur.stCount; b.textContent='📢 סטטוסים ('+cur.stCount+')'; }
