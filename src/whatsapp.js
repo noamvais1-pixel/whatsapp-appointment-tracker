@@ -274,7 +274,10 @@ export async function heartbeat() {
 }
 
 /** Can this Mac reach WhatsApp's servers right now? (a name lookup fails while Wi-Fi is still coming back) */
-const internetUp = () => new Promise((resolve) => dns.lookup("web.whatsapp.com", (err) => resolve(!err)));
+const internetUp = () => Promise.race([
+  new Promise((resolve) => dns.lookup("web.whatsapp.com", (err) => resolve(!err))),
+  new Promise((resolve) => setTimeout(() => resolve(false), 5000)), // a lookup that hangs counts as offline
+]);
 
 /**
  * Wait until the internet works, up to 15 minutes. Starting WhatsApp Web while the Mac is still
@@ -282,7 +285,7 @@ const internetUp = () => new Promise((resolve) => dns.lookup("web.whatsapp.com",
  * destroyed"), and the retries that follow lost the saved login on 2026-11-21 (Mac off ~19 h,
  * battery empty) - the phone had to scan the QR code again.
  */
-async function waitForInternet() {
+export async function waitForInternet() {
   if (await internetUp()) return true;
   console.warn("[whatsapp] no internet yet - waiting for it before reconnecting");
   state.lastError = tr("ממתין לחיבור לאינטרנט לפני התחברות מחדש", "waiting for the internet before reconnecting");
@@ -371,6 +374,7 @@ function createClient({ onReady } = {}) {
   client.on("auth_failure", (m) => { state.status = "disconnected"; state.lastError = String(m); console.error("[whatsapp] auth failure:", m); });
   client.on("disconnected", (r) => {
     if (current && current !== client) return; // an old client going away during a phone switch
+    if (reconnecting && current !== client) return; // the old client closing during a reconnect - not a new drop
     state.status = "disconnected"; state.lastError = String(r); console.error("[whatsapp] disconnected:", r);
     // After a LOGOUT the library re-injects into the same page, which breaks it: the page keeps
     // spinning and the QR codes it hands out can't be scanned. The "qr" event that follows also

@@ -1,5 +1,5 @@
 import { config } from "./config.js";
-import { startClient, getClient, state, sendToSelf, hardReconnect, isReconnecting, markDeletedOnPage } from "./whatsapp.js";
+import { startClient, getClient, state, sendToSelf, hardReconnect, isReconnecting, waitForInternet, markDeletedOnPage } from "./whatsapp.js";
 import { startServer } from "./server.js";
 import { processPending } from "./processor.js";
 import { buildDigest, localDateKey } from "./digest.js";
@@ -32,6 +32,8 @@ if ((process.env.KEEP_AWAKE || "true").toLowerCase() !== "false" && process.plat
 }
 
 startServer(getClient);
+// After a restart with no network yet (e.g. the Mac just booted), wait for it before opening WhatsApp Web.
+await waitForInternet();
 startClient({
   onReady: () => {
     console.log("[tracker] watching for new messages");
