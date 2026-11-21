@@ -624,7 +624,7 @@ function contactName(chatId, title) {
 }
 
 /**
- * Per chat, from WhatsApp Web's own models: the newest group notice it holds (e.g. "you joined",
+ * Per chat, from WhatsApp Web's own models: the newest notice a quiet group holds (e.g. "you joined",
  * which the chat's own time ignores), whether it is a community's parent entry, and whether it is a community's announcements group.
  */
 async function chatExtras() {
@@ -633,10 +633,11 @@ async function chatExtras() {
       window.require("WAWebCollections").Chat.getModelsArray().map((c) => {
         const gm = c.groupMetadata;
         let t = 0;
-        // Only for a group with no message since it was created (e.g. a community just joined): use its newest
-        // group notice ("you joined"). Busy groups keep WhatsApp's own time, so "X left" doesn't move them up.
+        // Only for a group with no message since it was created (e.g. a community just joined): use the newest
+        // notice the page holds ("you joined", "sharing is limited", ...). After a restart only the last one is
+        // loaded, and it can be any kind of notice. Busy groups keep WhatsApp's own time, so "X left" doesn't move them up.
         if (gm && (c.t || 0) <= (gm.creation || 0))
-          for (const m of c.msgs?.getModelsArray?.() || []) if (m.type === "gp2" && m.t > t) t = m.t;
+          for (const m of c.msgs?.getModelsArray?.() || []) if (m.t > t) t = m.t;
         return [c.id._serialized, t, !!gm?.isParentGroup, !!(gm?.defaultSubgroup && gm?.parentGroup)];
       })), 10000);
     return new Map(rows.map(([id, t, parent, community]) => [id, { t, parent, community }]));
