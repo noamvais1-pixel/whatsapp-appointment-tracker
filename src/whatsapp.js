@@ -664,7 +664,7 @@ export async function listChats() {
         .map((c) => ({
           id: c.id._serialized,
           name: c.isGroup
-            ? (c.name || c.id.user) + (extra.get(c.id._serialized)?.community ? tr(" · קהילה", " · community") : "")
+            ? (c.name || c.id.user) + (extra.get(c.id._serialized)?.community ? tr(" › הכרזות", " › Announcements") : "") // as WhatsApp names it inside the community
             : contactName(c.id._serialized, c.name || c.id.user),
           phone: c.isGroup ? "" : phoneFor(c.id._serialized),
           isGroup: !!c.isGroup,
