@@ -1,5 +1,5 @@
 import { config } from "./config.js";
-import { startClient, getClient, state, sendToSelf, hardReconnect, markDeletedOnPage } from "./whatsapp.js";
+import { startClient, getClient, state, sendToSelf, hardReconnect, isReconnecting, markDeletedOnPage } from "./whatsapp.js";
 import { startServer } from "./server.js";
 import { processPending } from "./processor.js";
 import { buildDigest, localDateKey } from "./digest.js";
@@ -119,7 +119,7 @@ let stuckSince = null;
 setInterval(() => {
   const connecting = ["starting", "authenticating"].includes(state.status);
   const dropped = state.status === "disconnected";
-  if (!connecting && !dropped) { stuckSince = null; return; }
+  if ((!connecting && !dropped) || isReconnecting()) { stuckSince = null; return; }
   stuckSince ??= Date.now();
   const limit = dropped ? 60_000 : 5 * 60_000;
   if (Date.now() - stuckSince > limit) {

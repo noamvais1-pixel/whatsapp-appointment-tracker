@@ -2,6 +2,7 @@ import pkg from "whatsapp-web.js";
 import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
+import dns from "node:dns";
 import qrcodeTerminal from "qrcode-terminal";
 import QRCode from "qrcode";
 import { config, chatAllowed } from "./config.js";
@@ -260,6 +261,8 @@ export async function heartbeat() {
     h.heartbeatFails = 0;
     return true;
   } catch (e) {
+    // No internet (e.g. just after waking): the page can't answer, but that's not a dead link - don't reconnect yet.
+    if (!(await internetUp())) { console.warn("[heartbeat] no internet right now - not counting this"); return false; }
     h.heartbeatFails++;
     console.warn(`[heartbeat] WhatsApp page did not answer (${h.heartbeatFails}): ${String(e.message).slice(0, 80)}`);
     if (h.heartbeatFails >= 2) {
@@ -270,19 +273,58 @@ export async function heartbeat() {
   }
 }
 
+/** Can this Mac reach WhatsApp's servers right now? (a name lookup fails while Wi-Fi is still coming back) */
+const internetUp = () => new Promise((resolve) => dns.lookup("web.whatsapp.com", (err) => resolve(!err)));
+
+/**
+ * Wait until the internet works, up to 15 minutes. Starting WhatsApp Web while the Mac is still
+ * offline after waking makes the page reload in the middle of starting ("Execution context was
+ * destroyed"), and the retries that follow lost the saved login on 2026-11-21 (Mac off ~19 h,
+ * battery empty) - the phone had to scan the QR code again.
+ */
+async function waitForInternet() {
+  if (await internetUp()) return true;
+  console.warn("[whatsapp] no internet yet - waiting for it before reconnecting");
+  state.lastError = tr("ממתין לחיבור לאינטרנט לפני התחברות מחדש", "waiting for the internet before reconnecting");
+  const until = Date.now() + 15 * 60_000;
+  while (Date.now() < until) {
+    await sleep(5000);
+    if (await internetUp()) {
+      console.log("[whatsapp] internet is back - waiting 20 s more for it to settle");
+      await sleep(20_000);
+      return true;
+    }
+  }
+  console.warn("[whatsapp] still no internet after 15 min - trying anyway");
+  return false;
+}
+
+let reconnecting = false;
+/** True while a reconnect is running (including waiting for the internet), so the watchdog doesn't start another. */
+export const isReconnecting = () => reconnecting;
+
 /** Reconnect from scratch: close the old client, kill any hidden Chrome still holding the login folder, start again. */
 export async function hardReconnect(reason = "") {
-  console.warn(`[whatsapp] reconnecting${reason ? ` (${reason})` : ""}`);
-  const old = current;
-  current = null;
-  state.status = "starting";
-  state.lastError = null;
-  if (old) {
-    try { await withTimeout(old.destroy(), 10000); }
-    catch (e) { console.warn("[whatsapp] old client did not close cleanly:", String(e.message).slice(0, 80)); }
+  if (reconnecting) { console.log(`[whatsapp] reconnect already in progress - skipping (${reason})`); return; }
+  reconnecting = true;
+  try {
+    console.warn(`[whatsapp] reconnecting${reason ? ` (${reason})` : ""}`);
+    const old = current;
+    current = null;
+    state.status = "starting";
+    state.lastError = null;
+    if (old) {
+      try { await withTimeout(old.destroy(), 10000); }
+      catch (e) { console.warn("[whatsapp] old client did not close cleanly:", String(e.message).slice(0, 80)); }
+    }
+    await killStaleBrowser();
+    // Only start WhatsApp Web again once the internet is back (the old browser is already closed, so nothing is lost by waiting).
+    await waitForInternet();
+    state.lastError = null;
+    startClient();
+  } finally {
+    reconnecting = false;
   }
-  await killStaleBrowser();
-  startClient();
 }
 
 const run = (cmd, args) => new Promise((resolve) => execFile(cmd, args, () => resolve()));
