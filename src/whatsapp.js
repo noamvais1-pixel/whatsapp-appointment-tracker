@@ -623,6 +623,29 @@ function contactName(chatId, title) {
   return (phone && contactNames.byPhone.get(phone)) || contactNames.byId.get(chatId) || title;
 }
 
+/**
+ * Per chat, from WhatsApp Web's own models: the newest group notice it holds (e.g. "you joined",
+ * which the chat's own time ignores), whether it is a community's parent entry, and whether it is a community's announcements group.
+ */
+async function chatExtras() {
+  try {
+    const rows = await withTimeout(current.pupPage.evaluate(() =>
+      window.require("WAWebCollections").Chat.getModelsArray().map((c) => {
+        const gm = c.groupMetadata;
+        let t = 0;
+        // Only for a group with no message since it was created (e.g. a community just joined): use its newest
+        // group notice ("you joined"). Busy groups keep WhatsApp's own time, so "X left" doesn't move them up.
+        if (gm && (c.t || 0) <= (gm.creation || 0))
+          for (const m of c.msgs?.getModelsArray?.() || []) if (m.type === "gp2" && m.t > t) t = m.t;
+        return [c.id._serialized, t, !!gm?.isParentGroup, !!(gm?.defaultSubgroup && gm?.parentGroup)];
+      })), 10000);
+    return new Map(rows.map(([id, t, parent, community]) => [id, { t, parent, community }]));
+  } catch (e) {
+    console.warn("[chats] could not read chat details:", String(e.message).slice(0, 100));
+    return new Map();
+  }
+}
+
 let chatListCache = { at: 0, list: [] };
 /** Chat list for the dashboard (live from WhatsApp when linked, else from stored messages). */
 export async function listChats() {
@@ -632,14 +655,21 @@ export async function listChats() {
     try {
       const chats = await current.getChats();
       loadContactNames(); // in the background
+      const extra = await chatExtras();
       const list = chats
         .filter((c) => c.id._serialized !== "status@broadcast" && chatAllowed(c, { includeGroups: true }))
+        // A community's own "parent" entry only holds system notices; its messages live in the announcements group.
+        .filter((c) => !extra.get(c.id._serialized)?.parent)
         .map((c) => ({
           id: c.id._serialized,
-          name: c.isGroup ? (c.name || c.id.user) : contactName(c.id._serialized, c.name || c.id.user),
+          name: c.isGroup
+            ? (c.name || c.id.user) + (extra.get(c.id._serialized)?.community ? tr(" · קהילה", " · community") : "")
+            : contactName(c.id._serialized, c.name || c.id.user),
           phone: c.isGroup ? "" : phoneFor(c.id._serialized),
           isGroup: !!c.isGroup,
-          timestamp: c.timestamp || 0,
+          // A newly joined community keeps the date it was created (maybe years ago) as its chat time,
+          // which buried it at the bottom of the list; the join notice on the page carries the real time.
+          timestamp: Math.max(c.timestamp || 0, extra.get(c.id._serialized)?.t || 0),
           unread: c.unreadCount || 0,
           last_body: c.lastMessage ? (messageText(c.lastMessage) || "") : "",
           last_from_me: !!c.lastMessage?.fromMe,
